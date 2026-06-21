@@ -1,0 +1,11 @@
+﻿downloads/
+__pycache__/
+*.pyc
+*.session
+*.session-journal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.log
+.env
+cookies.txt
