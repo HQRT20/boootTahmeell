@@ -10,6 +10,38 @@ from config import DOWNLOADS_DIR
 
 log = logging.getLogger("downloader.cobalt")
 
+
+def _fix_extension(filepath: str) -> str:
+    """Detect real file type and rename if needed."""
+    try:
+        with open(filepath, "rb") as f:
+            header = f.read(16)
+    except Exception:
+        return filepath
+
+    real_ext = None
+    if header[:8] == b'\x89PNG\r\n\x1a\n':
+        real_ext = "png"
+    elif header[:3] == b'\xff\xd8\xff':
+        real_ext = "jpg"
+    elif header[:4] == b'GIF8':
+        real_ext = "gif"
+    elif header[:4] == b'RIFF' and header[8:12] == b'WEBP':
+        real_ext = "webp"
+    elif header[:4] in (b'\x00\x00\x00\x1c', b'\x00\x00\x00\x18', b'\x00\x00\x00 '):
+        real_ext = "mp4"
+
+    if real_ext:
+        cur_ext = os.path.splitext(filepath)[1].lstrip(".")
+        if cur_ext != real_ext:
+            new_path = os.path.splitext(filepath)[0] + "." + real_ext
+            try:
+                os.rename(filepath, new_path)
+                return new_path
+            except OSError:
+                pass
+    return filepath
+
 UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36')
 
@@ -206,6 +238,7 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                             img_url = m.group(1).replace("\\u0026", "&")
                             f = _dl(img_url, f"ig_emb_{len(files)}", "jpg")
                             if f:
+                                f = _fix_extension(f)
                                 files.append(f)
                             if len(files) >= 10:
                                 break
@@ -215,6 +248,7 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                             ext = "mp4" if "video" in media_url else "jpg"
                             f = _dl(media_url, f"ig_emb_{len(files)}", ext)
                             if f:
+                                f = _fix_extension(f)
                                 files.append(f)
                             if len(files) >= 10:
                                 break
@@ -277,6 +311,7 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                 img_url = match.group(1).replace("\\u0026", "&")
                 f = _dl(img_url, f"ig_img_{len(files)}", "jpg")
                 if f:
+                    f = _fix_extension(f)
                     files.append(f)
                 if len(files) >= 10:
                     break
@@ -289,6 +324,7 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
             if img_m:
                 f = _dl(img_m.group(1), "ig_img", "jpg")
                 if f:
+                    f = _fix_extension(f)
                     files.append(f)
 
         if files:
