@@ -244,6 +244,7 @@ async def message_handler(client, message):
 if __name__ == "__main__":
     import threading
     import socket
+    import time
 
     def health_server(port):
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -262,5 +263,17 @@ if __name__ == "__main__":
     threading.Thread(target=health_server, args=(8080,), daemon=True).start()
     print("Health server on port 8000 + 8080")
 
-    print("Bot starting...")
-    app.run()
+    while True:
+        try:
+            print("Bot starting...")
+            app.run()
+        except Exception as e:
+            if "FLOOD_WAIT" in str(e):
+                import re as _re
+                wait_match = _re.search(r'A wait of (\d+) seconds', str(e))
+                wait_sec = int(wait_match.group(1)) if wait_match else 1200
+                print(f"FloodWait: waiting {wait_sec} seconds before retry...")
+                time.sleep(wait_sec)
+            else:
+                print(f"Bot crashed: {e}")
+                time.sleep(30)
