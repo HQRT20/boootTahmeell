@@ -176,12 +176,62 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
     """Download Instagram by scraping the page for video/image URLs."""
     try:
         clean_url = url.split("?")[0].rstrip("/")
+
+        # Try mobile API first (less restrictive)
+        shortcode = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_-]+)', clean_url)
+        if shortcode:
+            sc = shortcode.group(1)
+            mobile_api = f"https://www.instagram.com/p/{sc}/embed/"
+            try:
+                r_embed = requests.get(
+                    mobile_api,
+                    headers={"User-Agent": UA, "Accept": "text/html"},
+                    timeout=15,
+                )
+                if r_embed.status_code == 200:
+                    files = []
+                    title = ""
+                    title_m = re.search(r'<title>([^<]+)', r_embed.text)
+                    if title_m:
+                        title = title_m.group(1).strip()[:100]
+                    for m in re.finditer(r'"video_url"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"', r_embed.text):
+                        vid_url = m.group(1).replace("\\u0026", "&")
+                        f = _dl(vid_url, f"ig_emb_{len(files)}", "mp4")
+                        if f:
+                            files.append(f)
+                        if len(files) >= 10:
+                            break
+                    if not files:
+                        for m in re.finditer(r'"display_url"\s*:\s*"(https?://[^"]+)"', r_embed.text):
+                            img_url = m.group(1).replace("\\u0026", "&")
+                            f = _dl(img_url, f"ig_emb_{len(files)}", "jpg")
+                            if f:
+                                files.append(f)
+                            if len(files) >= 10:
+                                break
+                    if not files:
+                        for m in re.finditer(r'src="(https?://[^"]*cdninstagram[^"]*)"', r_embed.text):
+                            media_url = m.group(1)
+                            ext = "mp4" if "video" in media_url else "jpg"
+                            f = _dl(media_url, f"ig_emb_{len(files)}", ext)
+                            if f:
+                                files.append(f)
+                            if len(files) >= 10:
+                                break
+                    if files:
+                        return files, title or "Instagram Media"
+            except Exception as e:
+                log.debug("instagram embed scrape failed: %s", e)
+
+        # Fallback: direct page scrape
         r = requests.get(
             clean_url,
             headers={
                 "User-Agent": UA,
-                "Accept": "text/html",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
                 "X-IG-App-ID": "936619743392459",
+                "Sec-Fetch-Mode": "navigate",
             },
             timeout=15,
         )
