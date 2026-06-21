@@ -248,7 +248,7 @@ if __name__ == "__main__":
     def health_server():
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind(("0.0.0.0", int(os.getenv("PORT", "8000"))))
+        srv.bind(("0.0.0.0", 8000))
         srv.listen(5)
         while True:
             try:
@@ -258,8 +258,22 @@ if __name__ == "__main__":
             except Exception:
                 pass
 
-    threading.Thread(target=health_server, daemon=True).start()
-    print(f"Health server on port {os.getenv('PORT', '8000')}")
+    def health_server(port):
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("0.0.0.0", port))
+        srv.listen(5)
+        while True:
+            try:
+                conn, _ = srv.accept()
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
+                conn.close()
+            except Exception:
+                pass
+
+    threading.Thread(target=health_server, args=(8000,), daemon=True).start()
+    threading.Thread(target=health_server, args=(8080,), daemon=True).start()
+    print("Health server on port 8000 + 8080")
 
     print("Bot starting...")
     app.run()
