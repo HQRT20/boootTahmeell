@@ -243,21 +243,23 @@ async def message_handler(client, message):
 
 if __name__ == "__main__":
     import threading
-    from http.server import HTTPServer, BaseHTTPRequestHandler
+    import socket
 
-    class HealthHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"OK")
-        def log_message(self, format, *args):
-            pass
+    def health_server():
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("0.0.0.0", int(os.getenv("PORT", "8000"))))
+        srv.listen(5)
+        while True:
+            try:
+                conn, _ = srv.accept()
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
+                conn.close()
+            except Exception:
+                pass
 
-    port = int(os.getenv("PORT", "8000"))
-    server = HTTPServer(("0.0.0.0", port), HealthHandler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"Health server on port {port}")
+    threading.Thread(target=health_server, daemon=True).start()
+    print(f"Health server on port {os.getenv('PORT', '8000')}")
 
     print("Bot starting...")
     app.run()
