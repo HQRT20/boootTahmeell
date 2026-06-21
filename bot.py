@@ -19,6 +19,44 @@ logging.basicConfig(
 )
 log = logging.getLogger("bot")
 
+
+def _compress_image(filepath: str, max_size: int = 1280, quality: int = 85) -> str:
+    """Compress image for Telegram upload. Returns new or same path."""
+    try:
+        from PIL import Image
+        ext = os.path.splitext(filepath)[1].lower()
+        if ext in (".mp4", ".webm", ".mkv", ".avi", ".mov"):
+            return filepath
+
+        img = Image.open(filepath)
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+
+        w, h = img.size
+        if w > max_size or h > max_size:
+            ratio = min(max_size / w, max_size / h)
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+
+        new_path = filepath.rsplit(".", 1)[0] + "_compressed.jpg"
+        img.save(new_path, "JPEG", quality=quality, optimize=True)
+        new_size = os.path.getsize(new_path)
+        old_size = os.path.getsize(filepath)
+        if new_size < old_size:
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
+            return new_path
+        else:
+            try:
+                os.remove(new_path)
+            except OSError:
+                pass
+            return filepath
+    except Exception as e:
+        log.debug("compress failed for %s: %s", filepath, e)
+        return filepath
+
 app = Client("downloader_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 
@@ -209,6 +247,8 @@ async def message_handler(client, message):
         pass
 
     caption = f"✅ **{title}**"
+
+    files = [_compress_image(f) for f in files]
 
     try:
         if len(files) == 1:
