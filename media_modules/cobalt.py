@@ -300,7 +300,7 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
 
 
 def download_pinterest_api(url: str) -> Tuple[List[str], str]:
-    """Download Pinterest via direct page scraping."""
+    """Download Pinterest via direct page scraping - only the main pin."""
     try:
         r = requests.get(url, headers={"User-Agent": UA}, allow_redirects=True, timeout=20)
         if r.status_code != 200:
@@ -311,19 +311,46 @@ def download_pinterest_api(url: str) -> Tuple[List[str], str]:
         if m:
             title = m.group(1).split("|")[0].strip()[:100]
 
+        # Try to get og:video first (for video pins)
+        video_m = re.search(r'<meta[^>]+content="([^"]*)"[^>]*\s+property="og:video"', r.text)
+        if video_m:
+            f = _dl(video_m.group(1), "pin_vid", "mp4")
+            if f:
+                return [f], title or "Pinterest Video"
+
+        # Get og:image (the main pin image)
+        img_m = re.search(r'<meta[^>]+content="([^"]*)"[^>]*\s+property="og:image"', r.text)
+        if img_m:
+            img_url = img_m.group(1)
+            # Get highest resolution
+            img_url = re.sub(r'/\d+x\d+/', '/originals/', img_url)
+            f = _dl(img_url, "pin_img", "jpg")
+            if f:
+                return [f], title or "Pinterest Image"
+
+        # Fallback: get largest pinimg image
         urls = []
         for match in re.finditer(
-            r'https://[^"\']*(?:pinimg\.com)[^"\']*\.(?:jpg|jpeg|png|webp|gif|mp4)',
+            r'https://i\.pinimg\.com/originals/[^\s"\'<>]+',
             r.text,
         ):
-            u = match.group(0).replace("\\u002F", "/").replace("\\/", "/")
-            if u not in urls and "75x75" not in u and "236x" not in u:
+            u = match.group(0).split('"')[0].split("'")[0].split('<')[0]
+            if u not in urls:
                 urls.append(u)
 
+        if not urls:
+            for match in re.finditer(
+                r'https://i\.pinimg\.com/\d+x\d+/[^\s"\'<>]+',
+                r.text,
+            ):
+                u = match.group(0).split('"')[0].split("'")[0].split('<')[0]
+                if u not in urls and "75x75" not in u:
+                    urls.append(u)
+
         files = []
-        for u in urls[:10]:
+        for u in urls[:1]:
             ext = _detect_ext(u)
-            f = _dl(u, f"pin_{len(files)}", ext)
+            f = _dl(u, "pin_img", ext)
             if f:
                 files.append(f)
 
