@@ -27,7 +27,7 @@ def build_ydl_opts(for_images: bool = False) -> dict:
     if for_images:
         base['format'] = 'best[ext=jpg]/best[ext=jpeg]/best[ext=png]/best[ext=webp]/best'
     else:
-        base['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        base['format'] = 'best[ext=mp4]/best[ext=webm]/best'
     if os.path.exists(COOKIES_FILE):
         base['cookiefile'] = COOKIES_FILE
     return base
