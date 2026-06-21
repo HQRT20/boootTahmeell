@@ -245,19 +245,6 @@ if __name__ == "__main__":
     import threading
     import socket
 
-    def health_server():
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind(("0.0.0.0", 8000))
-        srv.listen(5)
-        while True:
-            try:
-                conn, _ = srv.accept()
-                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
-                conn.close()
-            except Exception:
-                pass
-
     def health_server(port):
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
