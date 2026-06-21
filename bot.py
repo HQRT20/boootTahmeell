@@ -20,10 +20,11 @@ logging.basicConfig(
 log = logging.getLogger("bot")
 
 
-def _compress_image(filepath: str, max_size: int = 1280, quality: int = 85) -> str:
+def _compress_image(filepath: str, max_size: int = 800, quality: int = 75) -> str:
     """Compress image for Telegram upload. Returns new or same path."""
     try:
         from PIL import Image
+        from io import BytesIO
         ext = os.path.splitext(filepath)[1].lower()
         if ext in (".mp4", ".webm", ".mkv", ".avi", ".mov"):
             return filepath
@@ -37,22 +38,22 @@ def _compress_image(filepath: str, max_size: int = 1280, quality: int = 85) -> s
             ratio = min(max_size / w, max_size / h)
             img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
 
-        new_path = filepath.rsplit(".", 1)[0] + "_compressed.jpg"
-        img.save(new_path, "JPEG", quality=quality, optimize=True)
-        new_size = os.path.getsize(new_path)
+        buf = BytesIO()
+        img.save(buf, "JPEG", quality=quality, optimize=True)
+        buf.seek(0)
+
+        new_size = len(buf.getvalue())
         old_size = os.path.getsize(filepath)
         if new_size < old_size:
+            new_path = filepath.rsplit(".", 1)[0] + ".jpg"
+            with open(new_path, "wb") as out:
+                out.write(buf.getvalue())
             try:
                 os.remove(filepath)
             except OSError:
                 pass
             return new_path
-        else:
-            try:
-                os.remove(new_path)
-            except OSError:
-                pass
-            return filepath
+        return filepath
     except Exception as e:
         log.debug("compress failed for %s: %s", filepath, e)
         return filepath
@@ -248,35 +249,20 @@ async def message_handler(client, message):
 
     caption = f"✅ **{title}**"
 
-    files = [_compress_image(f) for f in files]
+    files = [_compress_image(f, max_size=800, quality=75) for f in files if not is_video_file(f)] + \
+            [_compress_image(f) for f in files if is_video_file(f)]
 
     try:
-        if len(files) == 1:
-            fp = files[0]
-            if is_video_file(fp):
-                await message.reply_video(fp, caption=caption, supports_streaming=True)
-            else:
-                await message.reply_photo(fp, caption=caption)
-        else:
+        for i, fp in enumerate(files):
             try:
-                media = []
-                for i, f in enumerate(files[:10]):
-                    cap = caption if i == 0 else None
-                    if is_video_file(f):
-                        media.append(InputMediaVideo(f, caption=cap, supports_streaming=True))
-                    else:
-                        media.append(InputMediaPhoto(f, caption=cap))
-                await message.reply_media_group(media)
-            except Exception:
-                for i, f in enumerate(files[:10]):
-                    try:
-                        if is_video_file(f):
-                            await message.reply_video(f, caption=caption if i == 0 else None, supports_streaming=True)
-                        else:
-                            await message.reply_photo(f, caption=caption if i == 0 else None)
-                    except Exception:
-                        pass
-                    await asyncio.sleep(0.5)
+                cap = caption if i == 0 else None
+                if is_video_file(fp):
+                    await message.reply_video(fp, caption=cap, supports_streaming=True)
+                else:
+                    await message.reply_photo(fp, caption=cap)
+            except Exception as e:
+                log.warning("upload file %d failed: %s", i, e)
+            await asyncio.sleep(1)
 
         try:
             await msg.delete()
