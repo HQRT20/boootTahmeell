@@ -218,14 +218,25 @@ async def message_handler(client, message):
             else:
                 await message.reply_photo(fp, caption=caption)
         else:
-            media = []
-            for i, f in enumerate(files[:10]):
-                cap = caption if i == 0 else None
-                if is_video_file(f):
-                    media.append(InputMediaVideo(f, caption=cap, supports_streaming=True))
-                else:
-                    media.append(InputMediaPhoto(f, caption=cap))
-            await message.reply_media_group(media)
+            try:
+                media = []
+                for i, f in enumerate(files[:10]):
+                    cap = caption if i == 0 else None
+                    if is_video_file(f):
+                        media.append(InputMediaVideo(f, caption=cap, supports_streaming=True))
+                    else:
+                        media.append(InputMediaPhoto(f, caption=cap))
+                await message.reply_media_group(media)
+            except Exception:
+                for i, f in enumerate(files[:10]):
+                    try:
+                        if is_video_file(f):
+                            await message.reply_video(f, caption=caption if i == 0 else None, supports_streaming=True)
+                        else:
+                            await message.reply_photo(f, caption=caption if i == 0 else None)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.5)
 
         try:
             await msg.delete()
