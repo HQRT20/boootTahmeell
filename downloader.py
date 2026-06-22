@@ -74,16 +74,23 @@ def download_media(url: str) -> Tuple[List[str], str]:
     os.makedirs("downloads", exist_ok=True)
 
     # 1. Try direct APIs (tikwm, fxtwitter, instagram scrape, etc.)
-    files, title = _try_api_first(url)
-    if files:
-        log.info("API download succeeded for %s: %d files", url[:60], len(files))
-        return files, title
+    log.info("download_media start: %s", url[:80])
+    try:
+        files, title = _try_api_first(url)
+        if files:
+            log.info("API download succeeded for %s: %d files", url[:60], len(files))
+            return files, title
+    except Exception as e:
+        log.warning("API download failed for %s: %s", url[:60], e)
 
     # 2. Try per-platform yt-dlp (youtube, tiktok, instagram playwright, etc.)
-    files, title = _try_platform_fallback(url)
-    if files:
-        log.info("Platform fallback succeeded for %s: %d files", url[:60], len(files))
-        return files, title
+    try:
+        files, title = _try_platform_fallback(url)
+        if files:
+            log.info("Platform fallback succeeded for %s: %d files", url[:60], len(files))
+            return files, title
+    except Exception as e:
+        log.warning("Platform fallback failed for %s: %s", url[:60], e)
 
     # 3. Try generic yt-dlp (works for 1000+ sites)
     log.info("Falling back to generic yt-dlp for %s", url[:60])
@@ -94,4 +101,5 @@ def download_media(url: str) -> Tuple[List[str], str]:
     except Exception as e:
         log.exception("yt-dlp failed for %s: %s", url[:60], e)
 
+    log.warning("All download methods failed for %s", url[:80])
     return [], ""

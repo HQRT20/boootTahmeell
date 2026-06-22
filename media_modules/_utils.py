@@ -19,10 +19,12 @@ def build_ydl_opts(for_images: bool = False) -> dict:
         'no_warnings': True,
         'ignore_no_formats_error': True,
         'http_chunk_size': 1048576,
-        'retries': 3,
-        'fragment_retries': 3,
-        'noplaylist': False,
+        'retries': 2,
+        'fragment_retries': 2,
+        'noplaylist': True,
         'extract_flat': False,
+        'socket_timeout': 30,
+        'http_timeout': 30,
     }
     if for_images:
         base['format'] = 'best[ext=jpg]/best[ext=jpeg]/best[ext=png]/best[ext=webp]/best'
@@ -134,11 +136,14 @@ def find_brave_exe() -> Optional[str]:
 
 def download_with_ytdlp(url: str, for_images: bool = False) -> Tuple[List[str], str]:
     import yt_dlp
+    import signal
     files: List[str] = []
     seen: set = set()
     title = "Media"
     try:
-        with yt_dlp.YoutubeDL(build_ydl_opts(for_images=for_images)) as ydl:
+        opts = build_ydl_opts(for_images=for_images)
+        log.info("yt-dlp starting: images=%s url=%s", for_images, url[:60])
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             if info:
                 title = (info.get('title') or info.get('description') or title)[:100]
@@ -149,6 +154,7 @@ def download_with_ytdlp(url: str, for_images: bool = False) -> Tuple[List[str], 
                     if f and f not in seen:
                         seen.add(f)
                         files.append(f)
+        log.info("yt-dlp done: %d files, title=%s", len(files), title[:40])
     except Exception as e:
         log.exception("yt-dlp failed: %s", e)
     return files, title

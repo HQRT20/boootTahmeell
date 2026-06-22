@@ -50,7 +50,7 @@ def _dl(url: str, prefix: str, ext: str = "mp4", retries: int = 2) -> Optional[s
     for attempt in range(retries + 1):
         try:
             filepath = os.path.join(DOWNLOADS_DIR, f"{prefix}_{uuid.uuid4().hex[:8]}.{ext}")
-            r = requests.get(url, headers={"User-Agent": UA}, stream=True, timeout=120)
+            r = requests.get(url, headers={"User-Agent": UA}, stream=True, timeout=30)
             if r.status_code != 200:
                 if attempt < retries:
                     import time; time.sleep(1)
@@ -210,6 +210,7 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
         clean_url = url.split("?")[0].rstrip("/")
 
         is_reel = "/reel/" in url.lower()
+        log.info("ig download start: reel=%s url=%s", is_reel, url[:80])
 
         img_index = 0
         idx_match = re.search(r'img_index=(\d+)', url)
@@ -222,11 +223,13 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
 
             ig_api_url = f"https://www.instagram.com/api/v1/media/shortcode/{sc}/info/"
             try:
+                log.info("ig api: trying %s", sc)
                 r_api = requests.get(
                     ig_api_url,
                     headers={"User-Agent": UA, "X-IG-App-ID": "936619743392459"},
                     timeout=10,
                 )
+                log.info("ig api: status=%d", r_api.status_code)
                 if r_api.status_code == 200:
                     adata = r_api.json()
                     media = adata.get("items") or []
@@ -306,6 +309,7 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
 
             mobile_api = f"https://www.instagram.com/p/{sc}/embed/"
             try:
+                log.info("ig embed: trying %s", sc)
                 r_embed = requests.get(
                     mobile_api,
                     headers={"User-Agent": UA, "Accept": "text/html"},
@@ -318,6 +322,8 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                     if title_m:
                         title = title_m.group(1).strip()[:100]
 
+                    log.info("ig embed: html=%d bytes, trying video_url", len(r_embed.text))
+
                     for m in re.finditer(r'"video_url"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"', r_embed.text):
                         vid_url = m.group(1).replace("\\u0026", "&")
                         f = _dl(vid_url, f"ig_emb_{len(files)}", "mp4")
@@ -325,6 +331,8 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                             files.append(f)
                         if len(files) >= 10:
                             break
+
+                    log.info("ig embed: video_url done, files=%d, trying cdninstagram", len(files))
 
                     if not files:
                         for m in re.finditer(r'src="(https?://[^"]*cdninstagram[^"]*/v/[^"]*)"', r_embed.text):
@@ -336,7 +344,9 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                             if len(files) >= 1:
                                 break
 
-                    if not files and not is_reel:
+                    log.info("ig embed: cdninstagram done, files=%d, trying display_url", len(files))
+
+                    if not files:
                         all_imgs = []
                         for m in re.finditer(r'"display_url"\s*:\s*"(https?://[^"]+)"', r_embed.text):
                             img_url = m.group(1).replace("\\u0026", "&")
@@ -375,11 +385,14 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                                         files.append(f)
 
                     if files:
+                        log.info("ig embed: returning %d files", len(files))
                         return files, title or "Instagram Media"
+                    log.info("ig embed: no files found from any method")
             except Exception as e:
                 log.debug("instagram embed scrape failed: %s", e)
 
         # Fallback: direct page scrape
+        log.info("ig page scrape: trying %s", clean_url[:60])
         r = requests.get(
             clean_url,
             headers={
@@ -476,10 +489,12 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                     files.append(f)
 
         if files:
+            log.info("ig page scrape: returning %d files", len(files))
             return files, title or "Instagram Media"
 
     except Exception as e:
         log.debug("instagram scrape failed: %s", e)
+    log.info("ig download: all methods failed for %s", url[:80])
     return [], ""
 
 

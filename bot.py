@@ -238,7 +238,12 @@ async def message_handler(client, message):
 
     files, title = [], "Media"
     try:
-        files, title = await asyncio.to_thread(download_media, url)
+        files, title = await asyncio.wait_for(
+            asyncio.to_thread(download_media, url),
+            timeout=90,
+        )
+    except asyncio.TimeoutError:
+        log.warning("download timed out after 90s for %s", url[:60])
     except Exception as e:
         log.exception("download_media error: %s", e)
 
