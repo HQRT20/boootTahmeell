@@ -269,7 +269,7 @@ async def message_handler(client, message):
         if is_video_file(f):
             compressed.append(f)
         else:
-            c = _compress_image(f, max_size=800, quality=75)
+            c = _compress_image(f, max_size=600, quality=60)
             if c and os.path.exists(c):
                 compressed.append(c)
             else:
