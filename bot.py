@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import logging
+from typing import Optional
 
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo
@@ -20,32 +21,37 @@ logging.basicConfig(
 log = logging.getLogger("bot")
 
 
-def _compress_image(filepath: str, max_size: int = 800, quality: int = 75) -> str:
-    """Compress image for Telegram upload. Returns same or new path."""
+def _compress_image(filepath: str, max_size: int = 800, quality: int = 75) -> Optional[str]:
+    """Compress/validate image for Telegram upload. Returns path or None if invalid."""
     try:
         from PIL import Image
         ext = os.path.splitext(filepath)[1].lower()
         if ext in (".mp4", ".webm", ".mkv", ".avi", ".mov"):
             return filepath
         if not os.path.exists(filepath):
-            return filepath
+            return None
 
         img = Image.open(filepath)
+        img.load()
+
         if img.mode in ("RGBA", "P"):
             img = img.convert("RGB")
 
         w, h = img.size
-        if w > max_size or h > max_size:
-            ratio = min(max_size / w, max_size / h)
-            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        if w < 10 or h < 10:
+            return None
 
         if w <= max_size and h <= max_size and ext == ".jpg":
             return filepath
 
+        if w > max_size or h > max_size:
+            ratio = min(max_size / w, max_size / h)
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+
         new_path = filepath.rsplit(".", 1)[0] + "_c.jpg"
         img.save(new_path, "JPEG", quality=quality, optimize=True)
 
-        if os.path.exists(new_path) and os.path.getsize(new_path) > 0:
+        if os.path.exists(new_path) and os.path.getsize(new_path) > 100:
             try:
                 os.remove(filepath)
             except OSError:
@@ -53,8 +59,12 @@ def _compress_image(filepath: str, max_size: int = 800, quality: int = 75) -> st
             return new_path
         return filepath
     except Exception as e:
-        log.debug("compress failed for %s: %s", filepath, e)
-        return filepath
+        log.debug("compress/validation failed for %s: %s", filepath, e)
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+        return None
 
 app = Client("downloader_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -254,7 +264,9 @@ async def message_handler(client, message):
         if is_video_file(f):
             compressed.append(f)
         else:
-            compressed.append(_compress_image(f, max_size=800, quality=75))
+            c = _compress_image(f, max_size=800, quality=75)
+            if c:
+                compressed.append(c)
     files = [f for f in compressed if os.path.exists(f)]
 
     try:
@@ -262,11 +274,18 @@ async def message_handler(client, message):
             try:
                 if not os.path.exists(fp):
                     continue
+                fsize = os.path.getsize(fp)
+                if fsize < 100:
+                    log.warning("skip tiny file %s (%d bytes)", fp, fsize)
+                    continue
                 cap = caption if i == 0 else None
                 if is_video_file(fp):
                     await message.reply_video(fp, caption=cap, supports_streaming=True)
                 else:
-                    await message.reply_photo(fp, caption=cap)
+                    try:
+                        await message.reply_photo(fp, caption=cap)
+                    except Exception:
+                        await message.reply_document(fp, caption=cap)
             except Exception as e:
                 log.warning("upload file %d failed: %s", i, e)
             await asyncio.sleep(1)
