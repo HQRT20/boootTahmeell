@@ -21,12 +21,13 @@ log = logging.getLogger("bot")
 
 
 def _compress_image(filepath: str, max_size: int = 800, quality: int = 75) -> str:
-    """Compress image for Telegram upload. Returns new or same path."""
+    """Compress image for Telegram upload. Returns same or new path."""
     try:
         from PIL import Image
-        from io import BytesIO
         ext = os.path.splitext(filepath)[1].lower()
         if ext in (".mp4", ".webm", ".mkv", ".avi", ".mov"):
+            return filepath
+        if not os.path.exists(filepath):
             return filepath
 
         img = Image.open(filepath)
@@ -38,16 +39,13 @@ def _compress_image(filepath: str, max_size: int = 800, quality: int = 75) -> st
             ratio = min(max_size / w, max_size / h)
             img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
 
-        buf = BytesIO()
-        img.save(buf, "JPEG", quality=quality, optimize=True)
-        buf.seek(0)
+        if w <= max_size and h <= max_size and ext == ".jpg":
+            return filepath
 
-        new_size = len(buf.getvalue())
-        old_size = os.path.getsize(filepath)
-        if new_size < old_size:
-            new_path = filepath.rsplit(".", 1)[0] + ".jpg"
-            with open(new_path, "wb") as out:
-                out.write(buf.getvalue())
+        new_path = filepath.rsplit(".", 1)[0] + "_c.jpg"
+        img.save(new_path, "JPEG", quality=quality, optimize=True)
+
+        if os.path.exists(new_path) and os.path.getsize(new_path) > 0:
             try:
                 os.remove(filepath)
             except OSError:
@@ -249,12 +247,21 @@ async def message_handler(client, message):
 
     caption = f"✅ **{title}**"
 
-    files = [_compress_image(f, max_size=800, quality=75) for f in files if not is_video_file(f)] + \
-            [_compress_image(f) for f in files if is_video_file(f)]
+    compressed = []
+    for f in files:
+        if not os.path.exists(f):
+            continue
+        if is_video_file(f):
+            compressed.append(f)
+        else:
+            compressed.append(_compress_image(f, max_size=800, quality=75))
+    files = [f for f in compressed if os.path.exists(f)]
 
     try:
         for i, fp in enumerate(files):
             try:
+                if not os.path.exists(fp):
+                    continue
                 cap = caption if i == 0 else None
                 if is_video_file(fp):
                     await message.reply_video(fp, caption=cap, supports_streaming=True)

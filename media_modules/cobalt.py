@@ -209,12 +209,13 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
     try:
         clean_url = url.split("?")[0].rstrip("/")
 
+        is_reel = "/reel/" in url.lower()
+
         img_index = 1
         idx_match = re.search(r'img_index=(\d+)', url)
         if idx_match:
             img_index = int(idx_match.group(1))
 
-        # Try mobile API first (less restrictive)
         shortcode = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_-]+)', clean_url)
         if shortcode:
             sc = shortcode.group(1)
@@ -231,6 +232,7 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                     title_m = re.search(r'<title>([^<]+)', r_embed.text)
                     if title_m:
                         title = title_m.group(1).strip()[:100]
+
                     for m in re.finditer(r'"video_url"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"', r_embed.text):
                         vid_url = m.group(1).replace("\\u0026", "&")
                         f = _dl(vid_url, f"ig_emb_{len(files)}", "mp4")
@@ -238,7 +240,18 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                             files.append(f)
                         if len(files) >= 10:
                             break
+
                     if not files:
+                        for m in re.finditer(r'src="(https?://[^"]*cdninstagram[^"]*/v/[^"]*)"', r_embed.text):
+                            media_url = m.group(1).replace("\\u0026", "&")
+                            f = _dl(media_url, f"ig_emb_{len(files)}", "mp4")
+                            if f:
+                                f = _fix_extension(f)
+                                files.append(f)
+                            if len(files) >= 1:
+                                break
+
+                    if not files and not is_reel:
                         all_imgs = []
                         for m in re.finditer(r'"display_url"\s*:\s*"(https?://[^"]+)"', r_embed.text):
                             img_url = m.group(1).replace("\\u0026", "&")
@@ -252,16 +265,6 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                                 f = _fix_extension(f)
                                 files.append(f)
 
-                    if not files:
-                        for m in re.finditer(r'src="(https?://[^"]*cdninstagram[^"]*)"', r_embed.text):
-                            media_url = m.group(1)
-                            ext = "mp4" if "video" in media_url else "jpg"
-                            f = _dl(media_url, f"ig_emb_{len(files)}", ext)
-                            if f:
-                                f = _fix_extension(f)
-                                files.append(f)
-                            if len(files) >= 1:
-                                break
                     if files:
                         return files, title or "Instagram Media"
             except Exception as e:
@@ -357,24 +360,21 @@ def download_pinterest_api(url: str) -> Tuple[List[str], str]:
         if m:
             title = m.group(1).split("|")[0].strip()[:100]
 
-        # Try to get og:video first (for video pins)
         video_m = re.search(r'<meta[^>]+content="([^"]*)"[^>]*\s+property="og:video"', r.text)
         if video_m:
             f = _dl(video_m.group(1), "pin_vid", "mp4")
             if f:
                 return [f], title or "Pinterest Video"
 
-        # Get og:image (the main pin image)
         img_m = re.search(r'<meta[^>]+content="([^"]*)"[^>]*\s+property="og:image"', r.text)
         if img_m:
             img_url = img_m.group(1)
-            # Get highest resolution
             img_url = re.sub(r'/\d+x\d+/', '/originals/', img_url)
             f = _dl(img_url, "pin_img", "jpg")
             if f:
+                f = _fix_extension(f)
                 return [f], title or "Pinterest Image"
 
-        # Fallback: get largest pinimg image
         urls = []
         for match in re.finditer(
             r'https://i\.pinimg\.com/originals/[^\s"\'<>]+',
@@ -398,6 +398,7 @@ def download_pinterest_api(url: str) -> Tuple[List[str], str]:
             ext = _detect_ext(u)
             f = _dl(u, "pin_img", ext)
             if f:
+                f = _fix_extension(f)
                 files.append(f)
 
         if files:
