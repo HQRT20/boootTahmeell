@@ -303,7 +303,7 @@ async def message_handler(client, message):
                 if fsize < 100:
                     log.warning("skip tiny file %s (%d bytes)", fp, fsize)
                     continue
-                log.info("uploading %s (%d bytes)", os.path.basename(fp), fsize)
+                log.info("processing %s (%d bytes)", os.path.basename(fp), fsize)
                 cap = caption if i == 0 else None
 
                 if is_video_file(fp):
@@ -316,28 +316,26 @@ async def message_handler(client, message):
                         except Exception:
                             log.warning("document upload also failed for video")
                 else:
-                    uploaded = False
-                    try:
-                        await asyncio.wait_for(message.reply_photo(fp, caption=cap), timeout=45)
-                        uploaded = True
-                    except Exception as e:
-                        log.info("direct photo upload failed (%s), trying telegraph", type(e).__name__)
-
-                    if not uploaded:
-                        telegraph_url = await asyncio.to_thread(_upload_to_telegraph, fp)
-                        if telegraph_url:
-                            log.info("telegraph upload ok: %s", telegraph_url)
-                            try:
-                                await message.reply_photo(telegraph_url, caption=cap)
-                                uploaded = True
-                            except Exception:
-                                log.warning("send telegraph URL as photo failed")
-
-                    if not uploaded:
+                    telegraph_url = await asyncio.to_thread(_upload_to_telegraph, fp)
+                    if telegraph_url:
+                        log.info("telegraph ok: %s", telegraph_url)
                         try:
-                            await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=45)
-                        except Exception as doc_e:
-                            log.warning("document fallback also failed: %s", doc_e)
+                            await message.reply_photo(telegraph_url, caption=cap)
+                        except Exception as send_err:
+                            log.warning("send telegraph photo failed: %s, trying document", send_err)
+                            try:
+                                await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=60)
+                            except Exception:
+                                log.warning("document fallback also failed")
+                    else:
+                        log.warning("telegraph upload failed, trying direct upload")
+                        try:
+                            await asyncio.wait_for(message.reply_photo(fp, caption=cap), timeout=45)
+                        except Exception:
+                            try:
+                                await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=45)
+                            except Exception:
+                                log.warning("all upload methods failed for %s", fp)
 
             except asyncio.TimeoutError:
                 log.warning("upload timed out for file %d: %s", i, fp)
