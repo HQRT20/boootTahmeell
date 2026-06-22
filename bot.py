@@ -80,9 +80,32 @@ def _upload_to_telegraph(filepath: str) -> Optional[str]:
             data = resp.json()
             if isinstance(data, list) and data and "src" in data[0]:
                 return "https://telegra.ph" + data[0]["src"]
+        log.debug("telegraph response: %s %s", resp.status_code, resp.text[:200])
     except Exception as e:
         log.debug("telegraph upload failed: %s", e)
     return None
+
+
+def _bot_api_send(chat_id: int, filepath: str, caption: str = "", is_video: bool = False) -> bool:
+    """Send file directly via Telegram Bot API (bypasses Pyrogram DC2)."""
+    try:
+        method = "sendVideo" if is_video else "sendPhoto"
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+        field = "video" if is_video else "photo"
+        data = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption
+            data["parse_mode"] = "Markdown"
+        with open(filepath, "rb") as f:
+            resp = requests.post(url, data=data, files={field: f}, timeout=120)
+        if resp.status_code == 200:
+            result = resp.json()
+            if result.get("ok"):
+                return True
+        log.debug("bot api %s failed: %s %s", method, resp.status_code, resp.text[:200])
+    except Exception as e:
+        log.debug("bot api send failed: %s", e)
+    return False
 
 
 def _cleanup(files):
@@ -304,38 +327,36 @@ async def message_handler(client, message):
                     log.warning("skip tiny file %s (%d bytes)", fp, fsize)
                     continue
                 log.info("processing %s (%d bytes)", os.path.basename(fp), fsize)
-                cap = caption if i == 0 else None
+                cap = caption if i == 0 else ""
+                is_vid = is_video_file(fp)
+                sent = False
 
-                if is_video_file(fp):
-                    try:
-                        await asyncio.wait_for(message.reply_video(fp, caption=cap, supports_streaming=True), timeout=60)
-                    except Exception as ve:
-                        log.warning("video upload failed: %s, trying document", ve)
+                sent = await asyncio.to_thread(_bot_api_send, uid, fp, cap, is_vid)
+                if sent:
+                    log.info("bot api send ok for %s", os.path.basename(fp))
+                else:
+                    if not is_vid:
+                        telegraph_url = await asyncio.to_thread(_upload_to_telegraph, fp)
+                        if telegraph_url:
+                            log.info("telegraph ok: %s", telegraph_url)
+                            try:
+                                if cap:
+                                    await message.reply_photo(telegraph_url, caption=cap)
+                                else:
+                                    await message.reply_photo(telegraph_url)
+                                sent = True
+                            except Exception as send_err:
+                                log.warning("send telegraph photo failed: %s", send_err)
+
+                    if not sent:
                         try:
                             await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=60)
-                        except Exception:
-                            log.warning("document upload also failed for video")
-                else:
-                    telegraph_url = await asyncio.to_thread(_upload_to_telegraph, fp)
-                    if telegraph_url:
-                        log.info("telegraph ok: %s", telegraph_url)
-                        try:
-                            await message.reply_photo(telegraph_url, caption=cap)
-                        except Exception as send_err:
-                            log.warning("send telegraph photo failed: %s, trying document", send_err)
-                            try:
-                                await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=60)
-                            except Exception:
-                                log.warning("document fallback also failed")
-                    else:
-                        log.warning("telegraph upload failed, trying direct upload")
-                        try:
-                            await asyncio.wait_for(message.reply_photo(fp, caption=cap), timeout=45)
-                        except Exception:
-                            try:
-                                await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=45)
-                            except Exception:
-                                log.warning("all upload methods failed for %s", fp)
+                            sent = True
+                        except Exception as doc_err:
+                            log.warning("document fallback failed: %s", doc_err)
+
+                if not sent:
+                    log.warning("all methods failed for %s", fp)
 
             except asyncio.TimeoutError:
                 log.warning("upload timed out for file %d: %s", i, fp)
