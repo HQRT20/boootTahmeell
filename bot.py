@@ -31,6 +31,10 @@ def _compress_image(filepath: str, max_size: int = 800, quality: int = 75) -> Op
         if not os.path.exists(filepath):
             return None
 
+        fsize = os.path.getsize(filepath)
+        if fsize < 100:
+            return None
+
         img = Image.open(filepath)
         img.load()
 
@@ -39,12 +43,14 @@ def _compress_image(filepath: str, max_size: int = 800, quality: int = 75) -> Op
 
         w, h = img.size
         if w < 10 or h < 10:
+            return None
+
+        need_resize = w > max_size or h > max_size
+        need_compress = fsize > 500 * 1024
+        if not need_resize and not need_compress:
             return filepath
 
-        if w <= max_size and h <= max_size and ext == ".jpg":
-            return filepath
-
-        if w > max_size or h > max_size:
+        if need_resize:
             ratio = min(max_size / w, max_size / h)
             img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
 
@@ -278,14 +284,20 @@ async def message_handler(client, message):
                 if fsize < 100:
                     log.warning("skip tiny file %s (%d bytes)", fp, fsize)
                     continue
+                log.info("uploading %s (%d bytes)", os.path.basename(fp), fsize)
                 cap = caption if i == 0 else None
                 if is_video_file(fp):
-                    await message.reply_video(fp, caption=cap, supports_streaming=True)
+                    await asyncio.wait_for(message.reply_video(fp, caption=cap, supports_streaming=True), timeout=120)
                 else:
                     try:
-                        await message.reply_photo(fp, caption=cap)
+                        await asyncio.wait_for(message.reply_photo(fp, caption=cap), timeout=120)
+                    except asyncio.TimeoutError:
+                        log.warning("photo upload timed out for %s, trying document", fp)
+                        await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=120)
                     except Exception:
-                        await message.reply_document(fp, caption=cap)
+                        await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=120)
+            except asyncio.TimeoutError:
+                log.warning("upload timed out for file %d: %s", i, fp)
             except Exception as e:
                 log.warning("upload file %d failed: %s", i, e)
             await asyncio.sleep(1)
