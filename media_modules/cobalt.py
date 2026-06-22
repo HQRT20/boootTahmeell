@@ -251,6 +251,7 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                         item = media[0]
                         title = (item.get("caption", {}) or {}).get("text", "")[:100] if isinstance(item.get("caption"), dict) else ""
                         is_vid = item.get("media_type") == 2
+                        is_carousel = item.get("media_type") == 8
                         if is_vid:
                             vs = item.get("video_versions") or []
                             if vs:
@@ -259,29 +260,55 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                                 if f:
                                     return [f], title or "Instagram Video"
                         else:
-                            carousel = item.get("carousel_media") or [item]
+                            carousel = item.get("carousel_media") or []
                             files = []
-                            if img_index > 0:
+                            if img_index > 0 and carousel:
                                 target_idx = max(0, min(img_index - 1, len(carousel) - 1))
                                 ci = carousel[target_idx]
-                                imgs = ci.get("image_versions2", {}).get("candidates") or []
+                                ci_type = ci.get("media_type")
+                                if ci_type == 2:
+                                    vs = ci.get("video_versions") or []
+                                    if vs:
+                                        best = max(vs, key=lambda v: v.get("width", 0) * v.get("height", 0))
+                                        f = _dl(best["url"], "ig_api_vid", "mp4")
+                                        if f:
+                                            files.append(f)
+                                else:
+                                    imgs = ci.get("image_versions2", {}).get("candidates") or []
+                                    if imgs:
+                                        best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
+                                        f = _dl(best["url"], "ig_api_img", "jpg")
+                                        if f:
+                                            f = _fix_extension(f)
+                                            files.append(f)
+                            elif carousel:
+                                for ci in carousel:
+                                    ci_type = ci.get("media_type")
+                                    if ci_type == 2:
+                                        vs = ci.get("video_versions") or []
+                                        if vs:
+                                            best = max(vs, key=lambda v: v.get("width", 0) * v.get("height", 0))
+                                            f = _dl(best["url"], f"ig_api_vid_{len(files)}", "mp4")
+                                            if f:
+                                                files.append(f)
+                                    else:
+                                        imgs = ci.get("image_versions2", {}).get("candidates") or []
+                                        if imgs:
+                                            best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
+                                            f = _dl(best["url"], f"ig_api_img_{len(files)}", "jpg")
+                                            if f:
+                                                f = _fix_extension(f)
+                                                files.append(f)
+                                    if len(files) >= 10:
+                                        break
+                            else:
+                                imgs = item.get("image_versions2", {}).get("candidates") or []
                                 if imgs:
                                     best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
                                     f = _dl(best["url"], "ig_api_img", "jpg")
                                     if f:
                                         f = _fix_extension(f)
                                         files.append(f)
-                            else:
-                                for ci in carousel:
-                                    imgs = ci.get("image_versions2", {}).get("candidates") or []
-                                    if imgs:
-                                        best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
-                                        f = _dl(best["url"], f"ig_api_img_{len(files)}", "jpg")
-                                        if f:
-                                            f = _fix_extension(f)
-                                            files.append(f)
-                                    if len(files) >= 10:
-                                        break
                             if files:
                                 return files, title or "Instagram Media"
             except Exception as e:
