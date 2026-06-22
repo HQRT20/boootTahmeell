@@ -219,6 +219,59 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
         shortcode = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_-]+)', clean_url)
         if shortcode:
             sc = shortcode.group(1)
+
+            oembed_url = f"https://www.instagram.com/api/v1/oembed/?url=https://www.instagram.com/p/{sc}/"
+            try:
+                r_oembed = requests.get(oembed_url, headers={"User-Agent": UA}, timeout=10)
+                if r_oembed.status_code == 200:
+                    odata = r_oembed.json()
+                    thumbnail = odata.get("thumbnail_url") or ""
+                    if thumbnail:
+                        f = _dl(thumbnail, "ig_oe", "jpg")
+                        if f:
+                            f = _fix_extension(f)
+                            files_check = [f]
+                            if files_check:
+                                title = (odata.get("title") or "")[:100]
+                                return files_check, title or "Instagram Media"
+            except Exception as e:
+                log.debug("oembed failed for %s: %s", sc, e)
+
+            ig_api_url = f"https://www.instagram.com/api/v1/media/shortcode/{sc}/info/"
+            try:
+                r_api = requests.get(
+                    ig_api_url,
+                    headers={"User-Agent": UA, "X-IG-App-ID": "936619743392459"},
+                    timeout=10,
+                )
+                if r_api.status_code == 200:
+                    adata = r_api.json()
+                    media = adata.get("items") or []
+                    if media:
+                        item = media[0]
+                        title = (item.get("caption", {}) or {}).get("text", "")[:100] if isinstance(item.get("caption"), dict) else ""
+                        is_vid = item.get("media_type") == 2
+                        if is_vid:
+                            vs = item.get("video_versions") or []
+                            if vs:
+                                best = max(vs, key=lambda v: v.get("width", 0) * v.get("height", 0))
+                                f = _dl(best["url"], "ig_api_vid", "mp4")
+                                if f:
+                                    return [f], title or "Instagram Video"
+                        else:
+                            carousel = item.get("carousel_media") or [item]
+                            target_idx = max(0, min(img_index - 1, len(carousel) - 1))
+                            ci = carousel[target_idx]
+                            imgs = ci.get("image_versions2", {}).get("candidates") or []
+                            if imgs:
+                                best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
+                                f = _dl(best["url"], "ig_api_img", "jpg")
+                                if f:
+                                    f = _fix_extension(f)
+                                    return [f], title or "Instagram Image"
+            except Exception as e:
+                log.debug("ig api info failed for %s: %s", sc, e)
+
             mobile_api = f"https://www.instagram.com/p/{sc}/embed/"
             try:
                 r_embed = requests.get(
