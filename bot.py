@@ -260,14 +260,18 @@ async def message_handler(client, message):
     compressed = []
     for f in files:
         if not os.path.exists(f):
+            log.warning("file missing before compress: %s", f)
             continue
         if is_video_file(f):
             compressed.append(f)
         else:
             c = _compress_image(f, max_size=800, quality=75)
-            if c:
+            if c and os.path.exists(c):
                 compressed.append(c)
+            else:
+                log.warning("compress returned invalid: %s -> %s", f, c)
     files = [f for f in compressed if os.path.exists(f)]
+    log.info("uploading %d files: %s", len(files), [os.path.basename(f) for f in files])
 
     try:
         for i, fp in enumerate(files):
