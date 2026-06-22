@@ -220,10 +220,6 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
         if shortcode:
             sc = shortcode.group(1)
 
-            if is_reel:
-                log.debug("reel %s skipped from API, letting yt-dlp handle", sc)
-                return [], ""
-
             ig_api_url = f"https://www.instagram.com/api/v1/media/shortcode/{sc}/info/"
             try:
                 r_api = requests.get(
@@ -236,7 +232,13 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                     media = adata.get("items") or []
                     if media:
                         item = media[0]
-                        title = (item.get("caption", {}) or {}).get("text", "")[:100] if isinstance(item.get("caption"), dict) else ""
+                        cap = item.get("caption")
+                        if isinstance(cap, dict):
+                            title = (cap.get("text") or "")[:100]
+                        elif isinstance(cap, str):
+                            title = cap[:100]
+                        else:
+                            title = ""
                         is_vid = item.get("media_type") == 2
                         if is_vid:
                             vs = item.get("video_versions") or []
