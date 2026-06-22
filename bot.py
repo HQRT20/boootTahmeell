@@ -21,8 +21,8 @@ logging.basicConfig(
 log = logging.getLogger("bot")
 
 
-def _compress_image(filepath: str, max_size: int = 800, quality: int = 75) -> Optional[str]:
-    """Compress/validate image for Telegram upload. Returns path or None if invalid."""
+def _compress_image(filepath: str, max_size: int = 600, quality: int = 60) -> Optional[str]:
+    """Compress image aggressively for Telegram upload from slow servers."""
     try:
         from PIL import Image
         ext = os.path.splitext(filepath)[1].lower()
@@ -45,14 +45,11 @@ def _compress_image(filepath: str, max_size: int = 800, quality: int = 75) -> Op
         if w < 10 or h < 10:
             return None
 
-        need_resize = w > max_size or h > max_size
-        need_compress = fsize > 500 * 1024
-        if not need_resize and not need_compress:
-            return filepath
+        ratio = min(max_size / w, max_size / h) if (w > max_size or h > max_size) else 1.0
+        new_w, new_h = int(w * ratio), int(h * ratio)
 
-        if need_resize:
-            ratio = min(max_size / w, max_size / h)
-            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        if ratio < 1.0:
+            img = img.resize((new_w, new_h), Image.LANCZOS)
 
         new_path = filepath.rsplit(".", 1)[0] + "_c.jpg"
         img.save(new_path, "JPEG", quality=quality, optimize=True)
