@@ -2,6 +2,8 @@ import asyncio
 import os
 import re
 import logging
+import requests
+import uuid
 from typing import Optional
 
 from pyrogram import Client, filters
@@ -66,6 +68,21 @@ def _compress_image(filepath: str, max_size: int = 600, quality: int = 60) -> Op
         return filepath
 
 app = Client("downloader_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+
+
+def _upload_to_telegraph(filepath: str) -> Optional[str]:
+    """Upload file to telegra.ph and return the URL."""
+    try:
+        url = "https://telegra.ph/upload"
+        with open(filepath, "rb") as f:
+            resp = requests.post(url, files={"file": ("file.jpg", f, "image/jpeg")}, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and data and "src" in data[0]:
+                return "https://telegra.ph" + data[0]["src"]
+    except Exception as e:
+        log.debug("telegraph upload failed: %s", e)
+    return None
 
 
 def _cleanup(files):
@@ -288,16 +305,40 @@ async def message_handler(client, message):
                     continue
                 log.info("uploading %s (%d bytes)", os.path.basename(fp), fsize)
                 cap = caption if i == 0 else None
+
                 if is_video_file(fp):
-                    await asyncio.wait_for(message.reply_video(fp, caption=cap, supports_streaming=True), timeout=120)
-                else:
                     try:
-                        await asyncio.wait_for(message.reply_photo(fp, caption=cap), timeout=120)
-                    except asyncio.TimeoutError:
-                        log.warning("photo upload timed out for %s, trying document", fp)
-                        await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=120)
-                    except Exception:
-                        await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=120)
+                        await asyncio.wait_for(message.reply_video(fp, caption=cap, supports_streaming=True), timeout=60)
+                    except Exception as ve:
+                        log.warning("video upload failed: %s, trying document", ve)
+                        try:
+                            await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=60)
+                        except Exception:
+                            log.warning("document upload also failed for video")
+                else:
+                    uploaded = False
+                    try:
+                        await asyncio.wait_for(message.reply_photo(fp, caption=cap), timeout=45)
+                        uploaded = True
+                    except Exception as e:
+                        log.info("direct photo upload failed (%s), trying telegraph", type(e).__name__)
+
+                    if not uploaded:
+                        telegraph_url = await asyncio.to_thread(_upload_to_telegraph, fp)
+                        if telegraph_url:
+                            log.info("telegraph upload ok: %s", telegraph_url)
+                            try:
+                                await message.reply_photo(telegraph_url, caption=cap)
+                                uploaded = True
+                            except Exception:
+                                log.warning("send telegraph URL as photo failed")
+
+                    if not uploaded:
+                        try:
+                            await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=45)
+                        except Exception as doc_e:
+                            log.warning("document fallback also failed: %s", doc_e)
+
             except asyncio.TimeoutError:
                 log.warning("upload timed out for file %d: %s", i, fp)
             except Exception as e:
