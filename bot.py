@@ -39,7 +39,7 @@ def _compress_image(filepath: str, max_size: int = 800, quality: int = 75) -> Op
 
         w, h = img.size
         if w < 10 or h < 10:
-            return None
+            return filepath
 
         if w <= max_size and h <= max_size and ext == ".jpg":
             return filepath
@@ -59,12 +59,8 @@ def _compress_image(filepath: str, max_size: int = 800, quality: int = 75) -> Op
             return new_path
         return filepath
     except Exception as e:
-        log.debug("compress/validation failed for %s: %s", filepath, e)
-        try:
-            os.remove(filepath)
-        except OSError:
-            pass
-        return None
+        log.debug("compress failed for %s: %s", filepath, e)
+        return filepath
 
 app = Client("downloader_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
