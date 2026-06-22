@@ -258,8 +258,25 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                             if img_url not in all_imgs:
                                 all_imgs.append(img_url)
 
-                        target_idx = max(0, min(img_index - 1, len(all_imgs) - 1)) if all_imgs else 0
+                        if not all_imgs:
+                            for m in re.finditer(r'"image_versions2".*?"url"\s*:\s*"(https?://[^"]+)"', r_embed.text):
+                                img_url = m.group(1).replace("\\u0026", "&")
+                                if img_url not in all_imgs:
+                                    all_imgs.append(img_url)
+
+                        if not all_imgs:
+                            for m in re.finditer(r'src="(https?://[^"]*cdninstagram[^"]*)"', r_embed.text):
+                                img_url = m.group(1).replace("\\u0026", "&")
+                                if img_url not in all_imgs and "/v/" not in img_url:
+                                    all_imgs.append(img_url)
+
+                        if not all_imgs:
+                            og_m = re.search(r'<meta[^>]+content="([^"]*)"[^>]*\s+property="og:image"', r_embed.text)
+                            if og_m:
+                                all_imgs.append(og_m.group(1).replace("\\u0026", "&"))
+
                         if all_imgs:
+                            target_idx = max(0, min(img_index - 1, len(all_imgs) - 1))
                             f = _dl(all_imgs[target_idx], "ig_emb", "jpg")
                             if f:
                                 f = _fix_extension(f)
@@ -319,6 +336,32 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
         if not files:
             for match in re.finditer(
                 r'"display_url"\s*:\s*"(https?://[^"]+)"',
+                r.text,
+            ):
+                img_url = match.group(1).replace("\\u0026", "&")
+                f = _dl(img_url, f"ig_img_{len(files)}", "jpg")
+                if f:
+                    f = _fix_extension(f)
+                    files.append(f)
+                if len(files) >= 10:
+                    break
+
+        if not files:
+            for match in re.finditer(
+                r'"image_versions2".*?"url"\s*:\s*"(https?://[^"]+)"',
+                r.text,
+            ):
+                img_url = match.group(1).replace("\\u0026", "&")
+                f = _dl(img_url, f"ig_img_{len(files)}", "jpg")
+                if f:
+                    f = _fix_extension(f)
+                    files.append(f)
+                if len(files) >= 10:
+                    break
+
+        if not files:
+            for match in re.finditer(
+                r'src="(https?://[^"]*cdninstagram[^"]*\.jpg[^"]*)"',
                 r.text,
             ):
                 img_url = match.group(1).replace("\\u0026", "&")
