@@ -211,7 +211,7 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
 
         is_reel = "/reel/" in url.lower()
 
-        img_index = 1
+        img_index = 0
         idx_match = re.search(r'img_index=(\d+)', url)
         if idx_match:
             img_index = int(idx_match.group(1))
@@ -260,15 +260,30 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                                     return [f], title or "Instagram Video"
                         else:
                             carousel = item.get("carousel_media") or [item]
-                            target_idx = max(0, min(img_index - 1, len(carousel) - 1))
-                            ci = carousel[target_idx]
-                            imgs = ci.get("image_versions2", {}).get("candidates") or []
-                            if imgs:
-                                best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
-                                f = _dl(best["url"], "ig_api_img", "jpg")
-                                if f:
-                                    f = _fix_extension(f)
-                                    return [f], title or "Instagram Image"
+                            files = []
+                            if img_index > 0:
+                                target_idx = max(0, min(img_index - 1, len(carousel) - 1))
+                                ci = carousel[target_idx]
+                                imgs = ci.get("image_versions2", {}).get("candidates") or []
+                                if imgs:
+                                    best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
+                                    f = _dl(best["url"], "ig_api_img", "jpg")
+                                    if f:
+                                        f = _fix_extension(f)
+                                        files.append(f)
+                            else:
+                                for ci in carousel:
+                                    imgs = ci.get("image_versions2", {}).get("candidates") or []
+                                    if imgs:
+                                        best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
+                                        f = _dl(best["url"], f"ig_api_img_{len(files)}", "jpg")
+                                        if f:
+                                            f = _fix_extension(f)
+                                            files.append(f)
+                                    if len(files) >= 10:
+                                        break
+                            if files:
+                                return files, title or "Instagram Media"
             except Exception as e:
                 log.debug("ig api info failed for %s: %s", sc, e)
 
@@ -329,11 +344,18 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                                 all_imgs.append(og_m.group(1).replace("\\u0026", "&"))
 
                         if all_imgs:
-                            target_idx = max(0, min(img_index - 1, len(all_imgs) - 1))
-                            f = _dl(all_imgs[target_idx], "ig_emb", "jpg")
-                            if f:
-                                f = _fix_extension(f)
-                                files.append(f)
+                            if img_index > 0:
+                                target_idx = max(0, min(img_index - 1, len(all_imgs) - 1))
+                                f = _dl(all_imgs[target_idx], "ig_emb", "jpg")
+                                if f:
+                                    f = _fix_extension(f)
+                                    files.append(f)
+                            else:
+                                for img_url in all_imgs[:10]:
+                                    f = _dl(img_url, f"ig_emb_{len(files)}", "jpg")
+                                    if f:
+                                        f = _fix_extension(f)
+                                        files.append(f)
 
                     if files:
                         return files, title or "Instagram Media"
