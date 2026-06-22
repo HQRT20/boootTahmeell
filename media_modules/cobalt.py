@@ -209,6 +209,11 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
     try:
         clean_url = url.split("?")[0].rstrip("/")
 
+        img_index = 1
+        idx_match = re.search(r'img_index=(\d+)', url)
+        if idx_match:
+            img_index = int(idx_match.group(1))
+
         # Try mobile API first (less restrictive)
         shortcode = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_-]+)', clean_url)
         if shortcode:
@@ -234,14 +239,19 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                         if len(files) >= 10:
                             break
                     if not files:
+                        all_imgs = []
                         for m in re.finditer(r'"display_url"\s*:\s*"(https?://[^"]+)"', r_embed.text):
                             img_url = m.group(1).replace("\\u0026", "&")
-                            f = _dl(img_url, f"ig_emb_{len(files)}", "jpg")
+                            if img_url not in all_imgs:
+                                all_imgs.append(img_url)
+
+                        target_idx = max(0, min(img_index - 1, len(all_imgs) - 1)) if all_imgs else 0
+                        if all_imgs:
+                            f = _dl(all_imgs[target_idx], "ig_emb", "jpg")
                             if f:
                                 f = _fix_extension(f)
                                 files.append(f)
-                            if len(files) >= 10:
-                                break
+
                     if not files:
                         for m in re.finditer(r'src="(https?://[^"]*cdninstagram[^"]*)"', r_embed.text):
                             media_url = m.group(1)
@@ -250,7 +260,7 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                             if f:
                                 f = _fix_extension(f)
                                 files.append(f)
-                            if len(files) >= 10:
+                            if len(files) >= 1:
                                 break
                     if files:
                         return files, title or "Instagram Media"
