@@ -220,23 +220,6 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
         if shortcode:
             sc = shortcode.group(1)
 
-            oembed_url = f"https://www.instagram.com/api/v1/oembed/?url=https://www.instagram.com/p/{sc}/"
-            try:
-                r_oembed = requests.get(oembed_url, headers={"User-Agent": UA}, timeout=10)
-                if r_oembed.status_code == 200:
-                    odata = r_oembed.json()
-                    thumbnail = odata.get("thumbnail_url") or ""
-                    if thumbnail:
-                        f = _dl(thumbnail, "ig_oe", "jpg")
-                        if f:
-                            f = _fix_extension(f)
-                            files_check = [f]
-                            if files_check:
-                                title = (odata.get("title") or "")[:100]
-                                return files_check, title or "Instagram Media"
-            except Exception as e:
-                log.debug("oembed failed for %s: %s", sc, e)
-
             ig_api_url = f"https://www.instagram.com/api/v1/media/shortcode/{sc}/info/"
             try:
                 r_api = requests.get(
@@ -251,7 +234,6 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                         item = media[0]
                         title = (item.get("caption", {}) or {}).get("text", "")[:100] if isinstance(item.get("caption"), dict) else ""
                         is_vid = item.get("media_type") == 2
-                        is_carousel = item.get("media_type") == 8
                         if is_vid:
                             vs = item.get("video_versions") or []
                             if vs:
@@ -313,6 +295,22 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                                 return files, title or "Instagram Media"
             except Exception as e:
                 log.debug("ig api info failed for %s: %s", sc, e)
+
+            oembed_url = f"https://www.instagram.com/api/v1/oembed/?url=https://www.instagram.com/p/{sc}/"
+            try:
+                r_oembed = requests.get(oembed_url, headers={"User-Agent": UA}, timeout=10)
+                if r_oembed.status_code == 200:
+                    odata = r_oembed.json()
+                    thumbnail = odata.get("thumbnail_url") or ""
+                    if thumbnail:
+                        f = _dl(thumbnail, "ig_oe", "jpg")
+                        if f:
+                            f = _fix_extension(f)
+                            if f:
+                                title = (odata.get("title") or "")[:100]
+                                return [f], title or "Instagram Media"
+            except Exception as e:
+                log.debug("oembed failed for %s: %s", sc, e)
 
             mobile_api = f"https://www.instagram.com/p/{sc}/embed/"
             try:
