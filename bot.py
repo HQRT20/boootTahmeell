@@ -384,21 +384,25 @@ if __name__ == "__main__":
     import time
 
     def health_server(port):
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind(("0.0.0.0", port))
-        srv.listen(5)
-        while True:
-            try:
-                conn, _ = srv.accept()
-                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
-                conn.close()
-            except Exception:
-                pass
+        try:
+            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind(("0.0.0.0", port))
+            srv.listen(5)
+            while True:
+                try:
+                    conn, _ = srv.accept()
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
+                    conn.close()
+                except Exception:
+                    pass
+        except OSError:
+            pass
 
+    render_port = int(os.environ.get("PORT", 8080))
+    threading.Thread(target=health_server, args=(render_port,), daemon=True).start()
     threading.Thread(target=health_server, args=(8000,), daemon=True).start()
-    threading.Thread(target=health_server, args=(8080,), daemon=True).start()
-    print("Health server on port 8000 + 8080")
+    print(f"Health server on port {render_port} + 8000")
 
     while True:
         try:
