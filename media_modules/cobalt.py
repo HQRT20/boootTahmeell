@@ -372,6 +372,10 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
 
                     # Carousel (sidecar): download all children
                     edges = media.get("edge_sidecar_to_children", {}).get("edges", [])
+                    children = media.get("children") or []
+                    if not edges and children:
+                        edges = [{"node": c} for c in children]
+                    log.info("ig graphql: edges=%d children=%d img_index=%d", len(edges), len(children), img_index)
                     if edges:
                         media_urls = []
                         for edge in edges:
