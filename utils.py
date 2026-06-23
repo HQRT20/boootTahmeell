@@ -53,6 +53,7 @@ def admin_kb(uid: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(t(uid, 'ban_btn'), callback_data="admin_ban"),
          InlineKeyboardButton(t(uid, 'unban_btn'), callback_data="admin_unban")],
         [InlineKeyboardButton(t(uid, 'channels_btn'), callback_data="admin_channels")],
+        [InlineKeyboardButton("Cookies", callback_data="admin_cookies")],
     ])
 
 def back_kb(uid: int, target: str = "admin_home") -> InlineKeyboardMarkup:

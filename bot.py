@@ -232,6 +232,24 @@ async def cb_handler(client, query):
                 [InlineKeyboardButton(t(uid, 'back_btn'), callback_data="admin_home")],
             ])
             await query.message.edit_text(t(uid, 'channels_btn'), reply_markup=kb)
+        elif data == "admin_cookies":
+            db.delete(f"state_{uid}")
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("Instagram", callback_data="admin_cookie_ig"),
+                 InlineKeyboardButton("Twitter", callback_data="admin_cookie_tw")],
+                [InlineKeyboardButton("Facebook", callback_data="admin_cookie_fb")],
+                [InlineKeyboardButton(t(uid, 'back_btn'), callback_data="admin_home")],
+            ])
+            await query.message.edit_text("🍪 اختر المنصة لكوكيز:", reply_markup=kb)
+        elif data.startswith("admin_cookie_"):
+            platform = data.replace("admin_cookie_", "")
+            db.set(f"state_{uid}", f"cookie_{platform}")
+            names = {"ig": "Instagram", "tw": "Twitter", "fb": "Facebook"}
+            await query.message.edit_text(
+                f"📤 ارسل محتوى ملف كوكيز {names.get(platform, platform)}:\n\n"
+                "الصق محتوى الملف كاملاً هنا (تنسيق Netscape)",
+                reply_markup=back_kb(uid, "admin_cookies")
+            )
         elif data == "admin_add_ch":
             db.set(f"state_{uid}", "add_ch")
             await query.message.edit_text(t(uid, 'add_ch_prompt'), reply_markup=back_kb(uid, "admin_channels"))
@@ -310,6 +328,22 @@ async def message_handler(client, message):
             except Exception as e:
                 log.debug("add channel failed: %s", e)
                 await message.reply_text(t(uid, 'ch_add_fail'))
+        elif state.startswith("cookie_"):
+            db.delete(f"state_{uid}")
+            platform = state.replace("cookie_", "")
+            files_map = {
+                "ig": "instagram_cookies.txt",
+                "tw": "twitter_cookies.txt",
+                "fb": "facebook_cookies.txt",
+            }
+            cookie_file = files_map.get(platform)
+            if cookie_file and text.strip():
+                with open(cookie_file, "w", encoding="utf-8") as f:
+                    f.write(text.strip())
+                log.info("cookies updated for %s by admin %s", platform, uid)
+                await message.reply_text(f"✅ تم حفظ كوكيز {platform.upper()} بنجاح في {cookie_file}")
+            else:
+                await message.reply_text("❌ بيانات غير صالحة")
         return
 
     # URL Handling
