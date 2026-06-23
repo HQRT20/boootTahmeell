@@ -4,52 +4,65 @@ import logging
 from typing import List, Tuple
 
 import requests
-from media_modules._utils import UA, download_with_ytdlp, download_url
+from media_modules._utils import UA, download_file, download_url, download_with_ytdlp
 
 log = logging.getLogger("downloader.pinterest")
 
-def _try_api_extract(url: str) -> Tuple[List[str], str]:
-    try:
-        r = requests.get(url, headers={'User-Agent': UA}, allow_redirects=True, timeout=20)
-        json_data = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*>({.*?})</script>', r.text, re.DOTALL)
-        if not json_data:
-            json_data = re.search(r'<script[^>]*id="__PWS_DATA__"[^>]*>({.*?})</script>', r.text, re.DOTALL)
-        if not json_data:
-            return [], ""
-
-        data = json.loads(json_data.group(1))
-        urls: List[str] = []
-        text = ""
-        for match_val in re.finditer(r'https://[^"\']*pinimg[^"\']*originals[^"\']+\.(?:jpg|jpeg|png|webp|gif|mp4)', json.dumps(data)):
-            u = match_val.group(0).replace('\\u002F', '/').replace('\\/', '/')
-            if u not in urls:
-                urls.append(u)
-        for match_val in re.finditer(r'"title":"([^"]+)"', r.text):
-            text = match_val.group(1)[:100]
-            break
-        if not text:
-            m = re.search(r'<title>([^<]+)', r.text)
-            if m:
-                text = m.group(1).split('|')[0].strip()[:100]
-
-        files: List[str] = []
-        for u in urls[:10]:
-            if "d53b014d86a6b6761bf649a0ed813c2b" in u:
-                continue
-            f = download_url(u, "pin")
-            if f:
-                files.append(f)
-        return files, text or "Pinterest Media"
-    except Exception as e:
-        log.debug("pinterest api extract failed: %s", e)
-    return [], ""
 
 def download_pinterest(url: str) -> Tuple[List[str], str]:
-    files, title = _try_api_extract(url)
+    files, title = _try_scrape(url)
     if files:
         return files, title
     files, title = download_with_ytdlp(url, for_images=False)
     if files:
         return files, title or "Pinterest Media"
-    files, title = download_with_ytdlp(url, for_images=True)
-    return files, title or "Pinterest Media"
+    return download_with_ytdlp(url, for_images=True)
+
+
+def _try_scrape(url: str) -> Tuple[List[str], str]:
+    try:
+        r = requests.get(url, headers={'User-Agent': UA}, allow_redirects=True, timeout=20)
+        if r.status_code != 200:
+            return [], ""
+
+        title = ""
+        m = re.search(r'<title>([^<]+)', r.text)
+        if m:
+            title = m.group(1).split("|")[0].strip()[:100]
+
+        video_m = re.search(r'<meta[^>]+content="([^"]*)"[^>]*\s+property="og:video"', r.text)
+        if video_m:
+            f = download_file(video_m.group(1), "pin_vid", referer="https://www.pinterest.com/")
+            if f:
+                return [f], title or "Pinterest Video"
+
+        img_m = re.search(r'<meta[^>]+content="([^"]*)"[^>]*\s+property="og:image"', r.text)
+        if img_m:
+            img_url = re.sub(r'/\d+x\d+/', '/originals/', img_m.group(1))
+            f = download_file(img_url, "pin_img", "jpg", referer="https://www.pinterest.com/")
+            if f:
+                return [f], title or "Pinterest Image"
+
+        urls = []
+        for match in re.finditer(r'https://i\.pinimg\.com/originals/[^\s"\'<>]+', r.text):
+            u = match.group(0).split('"')[0].split("'")[0].split('<')[0]
+            if u not in urls:
+                urls.append(u)
+
+        if not urls:
+            for match in re.finditer(r'https://i\.pinimg\.com/\d+x\d+/[^\s"\'<>]+', r.text):
+                u = match.group(0).split('"')[0].split("'")[0].split('<')[0]
+                if u not in urls and "75x75" not in u:
+                    urls.append(u)
+
+        files = []
+        for u in urls[:1]:
+            f = download_url(u, "pin_img", referer="https://www.pinterest.com/")
+            if f:
+                files.append(f)
+        if files:
+            return files, title or "Pinterest Media"
+
+    except Exception as e:
+        log.debug("pinterest scrape failed: %s", e)
+    return [], ""
