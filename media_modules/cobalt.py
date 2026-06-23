@@ -340,7 +340,7 @@ def _ig_download_media(media_urls, prefix="ig"):
 
 
 def download_instagram_api(url: str) -> Tuple[List[str], str]:
-    """Download Instagram using 4-layer extraction (API → GraphQL → Page → Embed)."""
+    """Download Instagram images via direct API. Videos are skipped (yt-dlp handles them with audio)."""
     try:
         clean_url = url.split("?")[0].rstrip("/")
         shortcode_match = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_-]+)', clean_url)
@@ -358,6 +358,8 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
         session = _get_ig_session(clean_url)
         media_id = _shortcode_to_mediaid(sc)
 
+        is_reel = "/reel/" in url.lower()
+
         # Method 1: API
         try:
             api_url = f"https://i.instagram.com/api/v1/media/{media_id}/info/"
@@ -374,15 +376,24 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                 data = r.json()
                 items = data.get("items") or []
                 if items:
-                    media_urls, title, _ = _ig_parse_item(items[0])
+                    item = items[0]
+                    media_urls, title, _ = _ig_parse_item(item)
+
+                    has_video = any(k == "video" for k, _ in media_urls)
+                    if has_video and is_reel:
+                        log.info("ig api: video detected on reel, skipping for yt-dlp audio merge")
+                        return [], ""
+
                     if media_urls:
                         if img_index > 0:
                             target = max(0, min(img_index - 1, len(media_urls) - 1))
                             media_urls = [media_urls[target]]
-                        log.info("ig api: found %d media items", len(media_urls))
-                        files = _ig_download_media(media_urls, "ig_api")
-                        if files:
-                            return files, title or "Instagram Media"
+                        img_only = [(k, u) for k, u in media_urls if k == "image"]
+                        if img_only:
+                            log.info("ig api: found %d image items", len(img_only))
+                            files = _ig_download_media(img_only, "ig_api")
+                            if files:
+                                return files, title or "Instagram Media"
         except Exception as e:
             log.debug("ig api failed: %s", e)
 

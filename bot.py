@@ -117,30 +117,32 @@ def _bot_api_send(chat_id: int, filepath: str, caption: str = "", is_video: bool
     clean_cap = (caption or "").replace("**", "").replace("__", "")
     fname = os.path.basename(filepath)
 
-    is_image = False
-    try:
-        from PIL import Image
-        img = Image.open(filepath)
-        img.verify()
-        is_image = True
-    except Exception:
-        pass
-
     if is_video:
-        methods = [("sendVideo", "video")]
-    elif is_image:
-        methods = [("sendPhoto", "photo"), ("sendDocument", "document")]
+        methods = [("sendVideo", "video", "video/mp4")]
     else:
-        methods = [("sendDocument", "document")]
+        is_image = False
+        try:
+            from PIL import Image
+            img = Image.open(filepath)
+            img.verify()
+            is_image = True
+        except Exception:
+            pass
+        if is_image:
+            methods = [("sendPhoto", "photo", "image/jpeg"), ("sendDocument", "document", "application/octet-stream")]
+        else:
+            methods = [("sendDocument", "document", "application/octet-stream")]
 
-    for method, field in methods:
+    for method, field, mime in methods:
         try:
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
             data = {"chat_id": chat_id}
-            if clean_cap:
+            if clean_cap and method != "sendVideo":
+                data["caption"] = clean_cap
+            if clean_cap and method == "sendVideo":
                 data["caption"] = clean_cap
             with open(filepath, "rb") as f:
-                resp = requests.post(url, data=data, files={field: (fname, f, "image/jpeg")}, timeout=90)
+                resp = requests.post(url, data=data, files={field: (fname, f, mime)}, timeout=120)
             if resp.status_code == 200:
                 result = resp.json()
                 if result.get("ok"):

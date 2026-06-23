@@ -29,9 +29,11 @@ def build_ydl_opts(for_images: bool = False) -> dict:
     if for_images:
         base['format'] = 'best[ext=jpg]/best[ext=jpeg]/best[ext=png]/best[ext=webp]/best'
     else:
-        base['format'] = 'best[ext=mp4]/best[ext=webm]/best'
+        base['format'] = 'best[acodec!=none][ext=mp4]/best[acodec!=none]/best'
     if os.path.exists(COOKIES_FILE):
         base['cookiefile'] = COOKIES_FILE
+    elif os.path.exists('instagram_cookies.txt'):
+        base['cookiefile'] = 'instagram_cookies.txt'
     return base
 
 def get_requests_cookies() -> Optional[http.cookiejar.CookieJar]:
