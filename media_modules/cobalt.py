@@ -11,6 +11,44 @@ from config import DOWNLOADS_DIR
 
 log = logging.getLogger("downloader.cobalt")
 
+_IG_COOKIES = {}
+
+
+def _load_ig_cookies():
+    """Load Instagram cookies from env var or cookies file."""
+    global _IG_COOKIES
+    if _IG_COOKIES:
+        return _IG_COOKIES
+
+    cookie_str = os.environ.get("IG_COOKIES", "")
+    if cookie_str:
+        for pair in cookie_str.split(";"):
+            pair = pair.strip()
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                _IG_COOKIES[k.strip()] = v.strip()
+        log.info("ig cookies loaded: %d from env", len(_IG_COOKIES))
+        return _IG_COOKIES
+
+    for path in ("instagram_cookies.txt", "cookies.txt"):
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        parts = line.split("\t")
+                        if len(parts) >= 7:
+                            _IG_COOKIES[parts[5]] = parts[6]
+                if _IG_COOKIES:
+                    log.info("ig cookies loaded: %d from %s", len(_IG_COOKIES), path)
+                    return _IG_COOKIES
+            except Exception as e:
+                log.debug("failed to load cookies from %s: %s", path, e)
+
+    return _IG_COOKIES
+
 
 def _fix_extension(filepath: str) -> str:
     """Detect real file type and rename if needed."""
@@ -231,10 +269,17 @@ def _get_ig_session(url):
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "none",
     })
-    try:
-        s.get(url, timeout=15)
-    except Exception:
-        pass
+
+    cookies = _load_ig_cookies()
+    if cookies:
+        s.cookies.update(cookies)
+        log.info("ig session: using %d saved cookies", len(cookies))
+    else:
+        try:
+            s.get(url, timeout=15)
+        except Exception:
+            pass
+
     return s
 
 
