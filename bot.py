@@ -26,7 +26,7 @@ log = logging.getLogger("bot")
 def _compress_image(filepath: str, max_size: int = 512, quality: int = 50) -> Optional[str]:
     """Compress image for Telegram. Returns path to valid JPEG or None."""
     try:
-        from PIL import Image
+        from PIL import Image, ExifTags
         ext = os.path.splitext(filepath)[1].lower()
         if ext in (".mp4", ".webm", ".mkv", ".avi", ".mov"):
             return filepath
@@ -40,23 +40,46 @@ def _compress_image(filepath: str, max_size: int = 512, quality: int = 50) -> Op
         img = Image.open(filepath)
         img.load()
 
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-        elif img.mode != "RGB":
+        try:
+            exif = img._getexif()
+            if exif:
+                orient_key = next(k for k, v in ExifTags.TAGS.items() if v == "Orientation")
+                orient = exif.get(orient_key)
+                if orient == 3:
+                    img = img.rotate(180, expand=True)
+                elif orient == 6:
+                    img = img.rotate(270, expand=True)
+                elif orient == 8:
+                    img = img.rotate(90, expand=True)
+        except Exception:
+            pass
+
+        if img.mode != "RGB":
             img = img.convert("RGB")
 
         w, h = img.size
         if w < 10 or h < 10:
             return None
 
+        if w % 2 != 0:
+            w -= 1
+        if h % 2 != 0:
+            h -= 1
+        if (w, h) != img.size:
+            img = img.resize((w, h), Image.LANCZOS)
+
         ratio = min(max_size / w, max_size / h) if (w > max_size or h > max_size) else 1.0
         new_w, new_h = int(w * ratio), int(h * ratio)
+        if new_w % 2 != 0:
+            new_w -= 1
+        if new_h % 2 != 0:
+            new_h -= 1
 
         if ratio < 1.0:
             img = img.resize((new_w, new_h), Image.LANCZOS)
 
         new_path = filepath.rsplit(".", 1)[0] + "_c.jpg"
-        img.save(new_path, "JPEG", quality=quality, optimize=True)
+        img.save(new_path, "JPEG", quality=quality, optimize=True, progressive=False, subsampling=0)
 
         if os.path.exists(new_path) and os.path.getsize(new_path) > 100:
             try:
@@ -90,26 +113,32 @@ def _upload_to_telegraph(filepath: str) -> Optional[str]:
 
 def _bot_api_send(chat_id: int, filepath: str, caption: str = "", is_video: bool = False) -> bool:
     """Send file directly via Telegram Bot API (bypasses Pyrogram DC2)."""
-    try:
-        method = "sendVideo" if is_video else "sendPhoto"
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
-        field = "video" if is_video else "photo"
-        data = {"chat_id": chat_id}
-        if caption:
-            clean_cap = caption.replace("**", "").replace("__", "")
-            data["caption"] = clean_cap
-        with open(filepath, "rb") as f:
-            resp = requests.post(url, data=data, files={field: f}, timeout=120)
-        if resp.status_code == 200:
-            result = resp.json()
-            if result.get("ok"):
-                log.info("bot api %s sent OK to %s", method, chat_id)
-                return True
-            log.warning("bot api %s ok=false: %s", method, str(result)[:200])
-        else:
-            log.warning("bot api %s HTTP %s: %s", method, resp.status_code, resp.text[:200])
-    except Exception as e:
-        log.warning("bot api %s failed: %s", method, e)
+    clean_cap = (caption or "").replace("**", "").replace("__", "")
+    fname = os.path.basename(filepath)
+
+    if is_video:
+        methods = [("sendVideo", "video")]
+    else:
+        methods = [("sendPhoto", "photo"), ("sendDocument", "document")]
+
+    for method, field in methods:
+        try:
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+            data = {"chat_id": chat_id}
+            if clean_cap:
+                data["caption"] = clean_cap
+            with open(filepath, "rb") as f:
+                resp = requests.post(url, data=data, files={field: (fname, f, "image/jpeg")}, timeout=90)
+            if resp.status_code == 200:
+                result = resp.json()
+                if result.get("ok"):
+                    log.info("bot api %s sent OK to %s", method, chat_id)
+                    return True
+                log.warning("bot api %s ok=false: %s", method, str(result)[:200])
+            else:
+                log.warning("bot api %s HTTP %s: %s", method, resp.status_code, resp.text[:200])
+        except Exception as e:
+            log.warning("bot api %s failed: %s", method, e)
     return False
 
 
@@ -336,38 +365,16 @@ async def message_handler(client, message):
                 is_vid = is_video_file(fp)
                 sent = False
 
-                if is_vid:
-                    sent = await asyncio.to_thread(_bot_api_send, uid, fp, cap, True)
-                    if not sent:
-                        try:
+                sent = await asyncio.to_thread(_bot_api_send, uid, fp, cap, is_vid)
+                if not sent:
+                    try:
+                        if is_vid:
                             await asyncio.wait_for(message.reply_video(fp, caption=cap, supports_streaming=True), timeout=60)
-                            sent = True
-                        except Exception:
-                            pass
-                else:
-                    telegraph_url = await asyncio.to_thread(_upload_to_telegraph, fp)
-                    if telegraph_url:
-                        log.info("telegraph ok: %s", telegraph_url)
-                        try:
-                            await message.reply_photo(telegraph_url, caption=cap)
-                            sent = True
-                        except Exception as e1:
-                            log.warning("reply_photo telegraph failed: %s", e1)
-                            try:
-                                await message.reply_text(telegraph_url, caption=cap)
-                                sent = True
-                            except Exception as e2:
-                                log.warning("reply_text telegraph failed: %s", e2)
-
-                    if not sent:
-                        sent = await asyncio.to_thread(_bot_api_send, uid, fp, cap, False)
-
-                    if not sent:
-                        try:
+                        else:
                             await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=60)
-                            sent = True
-                        except Exception as e3:
-                            log.warning("document fallback failed: %s", e3)
+                        sent = True
+                    except Exception as fallback_err:
+                        log.warning("pyrogram fallback failed: %s", fallback_err)
 
                 if sent:
                     log.info("delivered: %s", os.path.basename(fp))
