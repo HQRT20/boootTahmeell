@@ -281,6 +281,19 @@ def _ig_parse_item(item):
     return files, title, is_video
 
 
+def _ig_download_media(media_urls, prefix="ig"):
+    files = []
+    for kind, murl in media_urls:
+        ext = "mp4" if kind == "video" else "jpg"
+        tag = f"{prefix}_{'vid' if kind == 'video' else 'img'}_{len(files)}"
+        f = _dl(murl, tag, ext)
+        if f:
+            if kind == "image":
+                f = _fix_extension(f)
+            files.append(f)
+    return files
+
+
 def download_instagram_api(url: str) -> Tuple[List[str], str]:
     """Download Instagram using 4-layer extraction (API → GraphQL → Page → Embed)."""
     try:
@@ -289,7 +302,13 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
         if not shortcode_match:
             return [], ""
         sc = shortcode_match.group(1)
-        log.info("ig download: shortcode=%s url=%s", sc, url[:80])
+
+        img_index = 0
+        idx_match = re.search(r'img_index=(\d+)', url)
+        if idx_match:
+            img_index = int(idx_match.group(1))
+
+        log.info("ig download: shortcode=%s img_index=%d url=%s", sc, img_index, url[:80])
 
         session = _get_ig_session(clean_url)
         media_id = _shortcode_to_mediaid(sc)
@@ -310,18 +329,13 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                 data = r.json()
                 items = data.get("items") or []
                 if items:
-                    media_urls, title, is_video = _ig_parse_item(items[0])
+                    media_urls, title, _ = _ig_parse_item(items[0])
                     if media_urls:
+                        if img_index > 0:
+                            target = max(0, min(img_index - 1, len(media_urls) - 1))
+                            media_urls = [media_urls[target]]
                         log.info("ig api: found %d media items", len(media_urls))
-                        files = []
-                        for kind, murl in media_urls:
-                            prefix = "ig_vid" if kind == "video" else "ig_img"
-                            ext = "mp4" if kind == "video" else "jpg"
-                            f = _dl(murl, prefix, ext)
-                            if f:
-                                if kind == "image":
-                                    f = _fix_extension(f)
-                                files.append(f)
+                        files = _ig_download_media(media_urls, "ig_api")
                         if files:
                             return files, title or "Instagram Media"
         except Exception as e:
@@ -349,22 +363,47 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                 data = r.json()
                 media = data.get("data", {}).get("xdt_shortcode_media") or {}
                 if media:
-                    log.info("ig graphql: found media")
+                    log.info("ig graphql: found media, type=%s", media.get("__typename"))
                     files = []
-                    video_url = media.get("video_url")
-                    display_url = media.get("display_url")
-                    if video_url:
-                        f = _dl(video_url, "ig_gql_vid", "mp4")
-                        if f:
-                            files.append(f)
-                    elif display_url:
-                        f = _dl(display_url, "ig_gql_img", "jpg")
-                        if f:
-                            f = _fix_extension(f)
-                            files.append(f)
+                    title = ""
+                    caption_edges = media.get("edge_media_to_caption", {}).get("edges", [])
+                    if caption_edges:
+                        title = caption_edges[0].get("node", {}).get("text", "")[:100]
+
+                    # Carousel (sidecar): download all children
+                    edges = media.get("edge_sidecar_to_children", {}).get("edges", [])
+                    if edges:
+                        media_urls = []
+                        for edge in edges:
+                            child = edge.get("node", {})
+                            child_video = child.get("video_url")
+                            child_img = child.get("display_url") or child.get("thumbnail_src")
+                            if child_video:
+                                media_urls.append(("video", child_video))
+                            elif child_img:
+                                media_urls.append(("image", child_img))
+
+                        if media_urls:
+                            if img_index > 0:
+                                target = max(0, min(img_index - 1, len(media_urls) - 1))
+                                media_urls = [media_urls[target]]
+                            log.info("ig graphql carousel: %d items", len(media_urls))
+                            files = _ig_download_media(media_urls, "ig_gql")
+                    else:
+                        # Single media
+                        video_url = media.get("video_url")
+                        display_url = media.get("display_url")
+                        if video_url:
+                            f = _dl(video_url, "ig_gql_vid", "mp4")
+                            if f:
+                                files.append(f)
+                        elif display_url:
+                            f = _dl(display_url, "ig_gql_img", "jpg")
+                            if f:
+                                f = _fix_extension(f)
+                                files.append(f)
+
                     if files:
-                        caption_edges = media.get("edge_media_to_caption", {}).get("edges", [])
-                        title = caption_edges[0].get("node", {}).get("text", "")[:100] if caption_edges else ""
                         return files, title or "Instagram Media"
         except Exception as e:
             log.debug("ig graphql failed: %s", e)
@@ -389,29 +428,43 @@ def download_instagram_api(url: str) -> Tuple[List[str], str]:
                             post_page = pdata.get("entry_data", {}).get("PostPage", [{}])[0]
                             item = post_page.get("graphql", {}).get("shortcode_media", {})
                             if item:
-                                video_url = item.get("video_url")
-                                display_url = item.get("display_url") or item.get("thumbnail_src")
-                                if video_url:
-                                    f = _dl(video_url, "ig_page_vid", "mp4")
-                                    if f:
-                                        files.append(f)
-                                elif display_url:
-                                    f = _dl(display_url, "ig_page_img", "jpg")
-                                    if f:
-                                        f = _fix_extension(f)
-                                        files.append(f)
+                                edges = item.get("edge_sidecar_to_children", {}).get("edges", [])
+                                if edges:
+                                    media_urls = []
+                                    for edge in edges:
+                                        child = edge.get("node", {})
+                                        cv = child.get("video_url")
+                                        ci = child.get("display_url") or child.get("thumbnail_src")
+                                        if cv:
+                                            media_urls.append(("video", cv))
+                                        elif ci:
+                                            media_urls.append(("image", ci))
+                                    if media_urls:
+                                        if img_index > 0:
+                                            target = max(0, min(img_index - 1, len(media_urls) - 1))
+                                            media_urls = [media_urls[target]]
+                                        files = _ig_download_media(media_urls, "ig_page")
+                                else:
+                                    video_url = item.get("video_url")
+                                    display_url = item.get("display_url") or item.get("thumbnail_src")
+                                    if video_url:
+                                        f = _dl(video_url, "ig_page_vid", "mp4")
+                                        if f:
+                                            files.append(f)
+                                    elif display_url:
+                                        f = _dl(display_url, "ig_page_img", "jpg")
+                                        if f:
+                                            f = _fix_extension(f)
+                                            files.append(f)
                                 caption_edges = item.get("edge_media_to_caption", {}).get("edges", [])
                                 title = caption_edges[0].get("node", {}).get("text", "")[:100] if caption_edges else ""
                         else:
-                            media_urls, title, is_video = _ig_parse_item(item)
-                            for kind, murl in media_urls:
-                                prefix = "ig_page_vid" if kind == "video" else "ig_page_img"
-                                ext = "mp4" if kind == "video" else "jpg"
-                                f = _dl(murl, prefix, ext)
-                                if f:
-                                    if kind == "image":
-                                        f = _fix_extension(f)
-                                    files.append(f)
+                            media_urls, title, _ = _ig_parse_item(item)
+                            if media_urls:
+                                if img_index > 0:
+                                    target = max(0, min(img_index - 1, len(media_urls) - 1))
+                                    media_urls = [media_urls[target]]
+                                files = _ig_download_media(media_urls, "ig_page")
                         if files:
                             log.info("ig page scrape: found %d files", len(files))
                             return files, title or "Instagram Media"
