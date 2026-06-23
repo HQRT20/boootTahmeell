@@ -3,6 +3,7 @@ import re
 import uuid
 import json
 import logging
+import urllib.parse
 import requests
 from typing import List, Tuple, Optional
 
@@ -210,296 +211,250 @@ def download_twitter_api(url: str) -> Tuple[List[str], str]:
     return [], ""
 
 
+def _shortcode_to_mediaid(shortcode):
+    alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    media_id = 0
+    for char in shortcode:
+        media_id = media_id * 64 + alphabet.index(char)
+    return str(media_id)
+
+
+def _get_ig_session(url):
+    """Visit Instagram page to get cookies for API requests."""
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+        "X-IG-App-ID": "936619743392459",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+    })
+    try:
+        s.get(url, timeout=15)
+    except Exception:
+        pass
+    return s
+
+
+def _ig_parse_item(item):
+    """Parse an Instagram API item into (file_urls, title, is_video)."""
+    files, title, is_video = [], "", False
+
+    caption = item.get("caption")
+    if isinstance(caption, dict):
+        title = (caption.get("text") or "")[:100]
+    elif isinstance(caption, str):
+        title = caption[:100]
+
+    video_versions = item.get("video_versions") or []
+    carousel = item.get("carousel_media") or []
+
+    if video_versions and not carousel:
+        best = max(video_versions, key=lambda v: v.get("width", 0) * v.get("height", 0))
+        if best.get("url"):
+            files.append(("video", best["url"]))
+            is_video = True
+    elif carousel:
+        for ci in carousel:
+            ci_vids = ci.get("video_versions") or []
+            if ci_vids:
+                best = max(ci_vids, key=lambda v: v.get("width", 0) * v.get("height", 0))
+                if best.get("url"):
+                    files.append(("video", best["url"]))
+            else:
+                imgs = (ci.get("image_versions2") or {}).get("candidates") or []
+                if imgs:
+                    best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
+                    if best.get("url"):
+                        files.append(("image", best["url"]))
+            if len(files) >= 10:
+                break
+    else:
+        imgs = (item.get("image_versions2") or {}).get("candidates") or []
+        if imgs:
+            best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
+            if best.get("url"):
+                files.append(("image", best["url"]))
+
+    return files, title, is_video
+
+
 def download_instagram_api(url: str) -> Tuple[List[str], str]:
-    """Download Instagram by scraping the page for video/image URLs."""
+    """Download Instagram using 4-layer extraction (API → GraphQL → Page → Embed)."""
     try:
         clean_url = url.split("?")[0].rstrip("/")
+        shortcode_match = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_-]+)', clean_url)
+        if not shortcode_match:
+            return [], ""
+        sc = shortcode_match.group(1)
+        log.info("ig download: shortcode=%s url=%s", sc, url[:80])
 
-        is_reel = "/reel/" in url.lower()
-        log.info("ig download start: reel=%s url=%s", is_reel, url[:80])
+        session = _get_ig_session(clean_url)
+        media_id = _shortcode_to_mediaid(sc)
 
-        img_index = 0
-        idx_match = re.search(r'img_index=(\d+)', url)
-        if idx_match:
-            img_index = int(idx_match.group(1))
+        # Method 1: API
+        try:
+            api_url = f"https://i.instagram.com/api/v1/media/{media_id}/info/"
+            headers = {
+                "User-Agent": UA,
+                "X-IG-App-ID": "936619743392459",
+                "X-ASBD-ID": "198387",
+                "X-Requested-With": "XMLHttpRequest",
+            }
+            if "csrftoken" in session.cookies:
+                headers["X-CSRFToken"] = session.cookies["csrftoken"]
+            r = session.get(api_url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                items = data.get("items") or []
+                if items:
+                    media_urls, title, is_video = _ig_parse_item(items[0])
+                    if media_urls:
+                        log.info("ig api: found %d media items", len(media_urls))
+                        files = []
+                        for kind, murl in media_urls:
+                            prefix = "ig_vid" if kind == "video" else "ig_img"
+                            ext = "mp4" if kind == "video" else "jpg"
+                            f = _dl(murl, prefix, ext)
+                            if f:
+                                if kind == "image":
+                                    f = _fix_extension(f)
+                                files.append(f)
+                        if files:
+                            return files, title or "Instagram Media"
+        except Exception as e:
+            log.debug("ig api failed: %s", e)
 
-        shortcode = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_-]+)', clean_url)
-        if shortcode:
-            sc = shortcode.group(1)
-
-            ig_api_url = f"https://www.instagram.com/api/v1/media/shortcode/{sc}/info/"
-            try:
-                log.info("ig api: trying %s", sc)
-                r_api = requests.get(
-                    ig_api_url,
-                    headers={"User-Agent": UA, "X-IG-App-ID": "936619743392459"},
-                    timeout=10,
-                )
-                log.info("ig api: status=%d", r_api.status_code)
-                if r_api.status_code == 200:
-                    adata = r_api.json()
-                    media = adata.get("items") or []
-                    if media:
-                        item = media[0]
-                        cap = item.get("caption")
-                        if isinstance(cap, dict):
-                            title = (cap.get("text") or "")[:100]
-                        elif isinstance(cap, str):
-                            title = cap[:100]
-                        else:
-                            title = ""
-                        is_vid = item.get("media_type") == 2
-                        if is_vid:
-                            vs = item.get("video_versions") or []
-                            if vs:
-                                best = max(vs, key=lambda v: v.get("width", 0) * v.get("height", 0))
-                                f = _dl(best["url"], "ig_api_vid", "mp4")
-                                if f:
-                                    return [f], title or "Instagram Video"
-                        else:
-                            carousel = item.get("carousel_media") or []
-                            files = []
-                            if img_index > 0 and carousel:
-                                target_idx = max(0, min(img_index - 1, len(carousel) - 1))
-                                ci = carousel[target_idx]
-                                ci_type = ci.get("media_type")
-                                if ci_type == 2:
-                                    vs = ci.get("video_versions") or []
-                                    if vs:
-                                        best = max(vs, key=lambda v: v.get("width", 0) * v.get("height", 0))
-                                        f = _dl(best["url"], "ig_api_vid", "mp4")
-                                        if f:
-                                            files.append(f)
-                                else:
-                                    imgs = ci.get("image_versions2", {}).get("candidates") or []
-                                    if imgs:
-                                        best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
-                                        f = _dl(best["url"], "ig_api_img", "jpg")
-                                        if f:
-                                            f = _fix_extension(f)
-                                            files.append(f)
-                            elif carousel:
-                                for ci in carousel:
-                                    ci_type = ci.get("media_type")
-                                    if ci_type == 2:
-                                        vs = ci.get("video_versions") or []
-                                        if vs:
-                                            best = max(vs, key=lambda v: v.get("width", 0) * v.get("height", 0))
-                                            f = _dl(best["url"], f"ig_api_vid_{len(files)}", "mp4")
-                                            if f:
-                                                files.append(f)
-                                    else:
-                                        imgs = ci.get("image_versions2", {}).get("candidates") or []
-                                        if imgs:
-                                            best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
-                                            f = _dl(best["url"], f"ig_api_img_{len(files)}", "jpg")
-                                            if f:
-                                                f = _fix_extension(f)
-                                                files.append(f)
-                                    if len(files) >= 10:
-                                        break
-                            else:
-                                imgs = item.get("image_versions2", {}).get("candidates") or []
-                                if imgs:
-                                    best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
-                                    f = _dl(best["url"], "ig_api_img", "jpg")
-                                    if f:
-                                        f = _fix_extension(f)
-                                        files.append(f)
-                            if files:
-                                return files, title or "Instagram Media"
-                else:
-                    log.debug("ig api returned %d for %s", r_api.status_code, sc)
-            except Exception as e:
-                log.debug("ig api info failed for %s: %s", sc, e)
-
-            mobile_api = f"https://www.instagram.com/p/{sc}/embed/"
-            try:
-                log.info("ig embed: trying %s", sc)
-                r_embed = requests.get(
-                    mobile_api,
-                    headers={"User-Agent": UA, "Accept": "text/html"},
-                    timeout=15,
-                )
-                if r_embed.status_code == 200:
+        # Method 2: GraphQL
+        try:
+            variables = json.dumps({
+                "shortcode": sc,
+                "child_comment_count": 0,
+                "fetch_comment_count": 0,
+                "parent_comment_count": 0,
+                "has_threaded_comments": False,
+            })
+            gql_url = f"https://www.instagram.com/graphql/query/?doc_id=8845758582119845&variables={urllib.parse.quote(variables)}"
+            headers = {
+                "User-Agent": UA,
+                "X-IG-App-ID": "936619743392459",
+                "X-Requested-With": "XMLHttpRequest",
+            }
+            if "csrftoken" in session.cookies:
+                headers["X-CSRFToken"] = session.cookies["csrftoken"]
+            r = session.get(gql_url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                media = data.get("data", {}).get("xdt_shortcode_media") or {}
+                if media:
+                    log.info("ig graphql: found media")
                     files = []
-                    title = ""
-                    title_m = re.search(r'<title>([^<]+)', r_embed.text)
-                    if title_m:
-                        title = title_m.group(1).strip()[:100]
-
-                    log.info("ig embed: html=%d bytes, trying video_url", len(r_embed.text))
-
-                    for m in re.finditer(r'"video_url"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"', r_embed.text):
-                        vid_url = m.group(1).replace("\\u0026", "&")
-                        f = _dl(vid_url, f"ig_emb_{len(files)}", "mp4")
+                    video_url = media.get("video_url")
+                    display_url = media.get("display_url")
+                    if video_url:
+                        f = _dl(video_url, "ig_gql_vid", "mp4")
                         if f:
                             files.append(f)
-                        if len(files) >= 10:
-                            break
+                    elif display_url:
+                        f = _dl(display_url, "ig_gql_img", "jpg")
+                        if f:
+                            f = _fix_extension(f)
+                            files.append(f)
+                    if files:
+                        caption_edges = media.get("edge_media_to_caption", {}).get("edges", [])
+                        title = caption_edges[0].get("node", {}).get("text", "")[:100] if caption_edges else ""
+                        return files, title or "Instagram Media"
+        except Exception as e:
+            log.debug("ig graphql failed: %s", e)
 
-                    log.info("ig embed: video_url done, files=%d, trying cdninstagram", len(files))
+        # Method 3: Page HTML scrape (window.__additionalDataLoaded / _sharedData)
+        try:
+            r = session.get(clean_url, headers={"User-Agent": UA}, timeout=15)
+            html = r.text
+            files = []
+            title = ""
 
-                    if not files:
-                        for m in re.finditer(r'src="(https?://[^"]*cdninstagram[^"]*/v/[^"]*)"', r_embed.text):
-                            media_url = m.group(1).replace("\\u0026", "&")
-                            f = _dl(media_url, f"ig_emb_{len(files)}", "mp4")
-                            if f:
-                                f = _fix_extension(f)
-                                files.append(f)
-                            if len(files) >= 1:
-                                break
-
-                    log.info("ig embed: cdninstagram done, files=%d, trying display_url", len(files))
-
-                    if not files:
-                        all_imgs = []
-                        for m in re.finditer(r'"display_url"\s*:\s*"(https?://[^"]+)"', r_embed.text):
-                            img_url = m.group(1).replace("\\u0026", "&")
-                            if img_url not in all_imgs:
-                                all_imgs.append(img_url)
-
-                        if not all_imgs:
-                            for m in re.finditer(r'"image_versions2".*?"url"\s*:\s*"(https?://[^"]+)"', r_embed.text):
-                                img_url = m.group(1).replace("\\u0026", "&")
-                                if img_url not in all_imgs:
-                                    all_imgs.append(img_url)
-
-                        if not all_imgs:
-                            for m in re.finditer(r'src="(https?://[^"]*cdninstagram[^"]*)"', r_embed.text):
-                                img_url = m.group(1).replace("\\u0026", "&")
-                                if img_url not in all_imgs and "/v/" not in img_url:
-                                    all_imgs.append(img_url)
-
-                        if not all_imgs:
-                            og_m = re.search(r'<meta[^>]+content="([^"]*)"[^>]*\s+property="og:image"', r_embed.text)
-                            if og_m:
-                                all_imgs.append(og_m.group(1).replace("\\u0026", "&"))
-
-                        if all_imgs:
-                            if img_index > 0:
-                                target_idx = max(0, min(img_index - 1, len(all_imgs) - 1))
-                                f = _dl(all_imgs[target_idx], "ig_emb", "jpg")
-                                if f:
-                                    f = _fix_extension(f)
-                                    files.append(f)
-                            else:
-                                for img_url in all_imgs[:10]:
-                                    f = _dl(img_url, f"ig_emb_{len(files)}", "jpg")
+            for pattern in [
+                r'window\.__additionalDataLoaded\s*\(\s*[^,]+,\s*({.+?})\s*\)',
+                r'window\._sharedData\s*=\s*({.+?});\s*</script>',
+            ]:
+                match = re.search(pattern, html, re.DOTALL)
+                if match:
+                    try:
+                        pdata = json.loads(match.group(1))
+                        item = pdata.get("items", [{}])[0] if "items" in pdata else None
+                        if not item:
+                            post_page = pdata.get("entry_data", {}).get("PostPage", [{}])[0]
+                            item = post_page.get("graphql", {}).get("shortcode_media", {})
+                            if item:
+                                video_url = item.get("video_url")
+                                display_url = item.get("display_url") or item.get("thumbnail_src")
+                                if video_url:
+                                    f = _dl(video_url, "ig_page_vid", "mp4")
+                                    if f:
+                                        files.append(f)
+                                elif display_url:
+                                    f = _dl(display_url, "ig_page_img", "jpg")
                                     if f:
                                         f = _fix_extension(f)
                                         files.append(f)
+                                caption_edges = item.get("edge_media_to_caption", {}).get("edges", [])
+                                title = caption_edges[0].get("node", {}).get("text", "")[:100] if caption_edges else ""
+                        else:
+                            media_urls, title, is_video = _ig_parse_item(item)
+                            for kind, murl in media_urls:
+                                prefix = "ig_page_vid" if kind == "video" else "ig_page_img"
+                                ext = "mp4" if kind == "video" else "jpg"
+                                f = _dl(murl, prefix, ext)
+                                if f:
+                                    if kind == "image":
+                                        f = _fix_extension(f)
+                                    files.append(f)
+                        if files:
+                            log.info("ig page scrape: found %d files", len(files))
+                            return files, title or "Instagram Media"
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            log.debug("ig page scrape failed: %s", e)
 
-                    if files:
-                        log.info("ig embed: returning %d files", len(files))
-                        return files, title or "Instagram Media"
-                    log.info("ig embed: no files found from any method")
-            except Exception as e:
-                log.debug("instagram embed scrape failed: %s", e)
+        # Method 4: Embed (last resort, extract from data tags)
+        try:
+            r = session.get(f"https://www.instagram.com/p/{sc}/embed/", headers={"User-Agent": UA}, timeout=15)
+            html = r.text
+            files = []
+            title_m = re.search(r'<title>([^<]+)', html)
+            title = title_m.group(1).strip()[:100] if title_m else ""
 
-        # Fallback: direct page scrape
-        log.info("ig page scrape: trying %s", clean_url[:60])
-        r = requests.get(
-            clean_url,
-            headers={
-                "User-Agent": UA,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-                "X-IG-App-ID": "936619743392459",
-                "Sec-Fetch-Mode": "navigate",
-            },
-            timeout=15,
-        )
-        if r.status_code != 200:
-            return [], ""
-
-        title = ""
-        title_m = re.search(r'<meta[^>]+content="([^"]*)"[^>]*\s+property="og:title"', r.text)
-        if not title_m:
-            title_m = re.search(r'<title>([^<]+)', r.text)
-        if title_m:
-            title = title_m.group(1).strip()[:100]
-
-        files = []
-
-        video_m = re.search(
-            r'<meta[^>]+content="([^"]*)"[^>]*\s+property="og:video"',
-            r.text,
-        )
-        if video_m:
-            vid_url = video_m.group(1)
-            f = _dl(vid_url, "ig_vid", "mp4")
-            if f:
-                files.append(f)
-
-        if not files:
-            for match in re.finditer(
-                r'"video_url"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"',
-                r.text,
-            ):
-                vid_url = match.group(1).replace("\\u0026", "&")
-                f = _dl(vid_url, f"ig_vid_{len(files)}", "mp4")
+            for m in re.finditer(r'"video_url"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"', html):
+                vid_url = m.group(1).replace("\\u0026", "&")
+                f = _dl(vid_url, f"ig_emb_{len(files)}", "mp4")
                 if f:
                     files.append(f)
                 if len(files) >= 10:
                     break
 
-        if not files:
-            for match in re.finditer(
-                r'"display_url"\s*:\s*"(https?://[^"]+)"',
-                r.text,
-            ):
-                img_url = match.group(1).replace("\\u0026", "&")
-                f = _dl(img_url, f"ig_img_{len(files)}", "jpg")
-                if f:
-                    f = _fix_extension(f)
-                    files.append(f)
-                if len(files) >= 10:
-                    break
+            if not files:
+                for m in re.finditer(r'"display_url"\s*:\s*"(https?://[^"]+)"', html):
+                    img_url = m.group(1).replace("\\u0026", "&")
+                    f = _dl(img_url, f"ig_emb_{len(files)}", "jpg")
+                    if f:
+                        f = _fix_extension(f)
+                        files.append(f)
+                    if len(files) >= 10:
+                        break
 
-        if not files:
-            for match in re.finditer(
-                r'"image_versions2".*?"url"\s*:\s*"(https?://[^"]+)"',
-                r.text,
-            ):
-                img_url = match.group(1).replace("\\u0026", "&")
-                f = _dl(img_url, f"ig_img_{len(files)}", "jpg")
-                if f:
-                    f = _fix_extension(f)
-                    files.append(f)
-                if len(files) >= 10:
-                    break
-
-        if not files:
-            for match in re.finditer(
-                r'src="(https?://[^"]*cdninstagram[^"]*\.jpg[^"]*)"',
-                r.text,
-            ):
-                img_url = match.group(1).replace("\\u0026", "&")
-                f = _dl(img_url, f"ig_img_{len(files)}", "jpg")
-                if f:
-                    f = _fix_extension(f)
-                    files.append(f)
-                if len(files) >= 10:
-                    break
-
-        if not files:
-            img_m = re.search(
-                r'<meta[^>]+content="([^"]*)"[^>]*\s+property="og:image"',
-                r.text,
-            )
-            if img_m:
-                f = _dl(img_m.group(1), "ig_img", "jpg")
-                if f:
-                    f = _fix_extension(f)
-                    files.append(f)
-
-        if files:
-            log.info("ig page scrape: returning %d files", len(files))
-            return files, title or "Instagram Media"
+            if files:
+                log.info("ig embed: found %d files", len(files))
+                return files, title or "Instagram Media"
+        except Exception as e:
+            log.debug("ig embed failed: %s", e)
 
     except Exception as e:
-        log.debug("instagram scrape failed: %s", e)
+        log.warning("ig download error: %s", e)
+
     log.info("ig download: all methods failed for %s", url[:80])
     return [], ""
 
