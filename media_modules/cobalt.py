@@ -50,7 +50,12 @@ def _dl(url: str, prefix: str, ext: str = "mp4", retries: int = 2) -> Optional[s
     for attempt in range(retries + 1):
         try:
             filepath = os.path.join(DOWNLOADS_DIR, f"{prefix}_{uuid.uuid4().hex[:8]}.{ext}")
-            r = requests.get(url, headers={"User-Agent": UA}, timeout=30)
+            headers = {
+                "User-Agent": UA,
+                "Accept": "*/*",
+                "Referer": "https://www.instagram.com/",
+            }
+            r = requests.get(url, headers=headers, timeout=30)
             if r.status_code != 200:
                 if attempt < retries:
                     import time; time.sleep(1)

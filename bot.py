@@ -116,10 +116,21 @@ def _bot_api_send(chat_id: int, filepath: str, caption: str = "", is_video: bool
     clean_cap = (caption or "").replace("**", "").replace("__", "")
     fname = os.path.basename(filepath)
 
+    is_image = False
+    try:
+        from PIL import Image
+        img = Image.open(filepath)
+        img.verify()
+        is_image = True
+    except Exception:
+        pass
+
     if is_video:
         methods = [("sendVideo", "video")]
-    else:
+    elif is_image:
         methods = [("sendPhoto", "photo"), ("sendDocument", "document")]
+    else:
+        methods = [("sendDocument", "document")]
 
     for method, field in methods:
         try:
@@ -347,7 +358,10 @@ async def message_handler(client, message):
             if c and os.path.exists(c):
                 compressed.append(c)
             else:
-                log.warning("compress returned invalid: %s -> %s", f, c)
+                fsize = os.path.getsize(f) if os.path.exists(f) else 0
+                if fsize > 100:
+                    log.info("compress failed but keeping file as document: %s (%d bytes)", os.path.basename(f), fsize)
+                    compressed.append(f)
     files = [f for f in compressed if os.path.exists(f)]
     log.info("uploading %d files: %s", len(files), [os.path.basename(f) for f in files])
 
