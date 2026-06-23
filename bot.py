@@ -316,22 +316,29 @@ async def message_handler(client, message):
     if not ok:
         return await message.reply_text(t(uid, 'subscribe_first'), reply_markup=InlineKeyboardMarkup(btns))
 
-    msg = await message.reply_text(t(uid, 'searching'))
-    try:
-        await msg.edit_text(t(uid, 'downloading'))
-    except Exception:
-        pass
+    msg = await message.reply_text("🔍 جارٍ تحليل الرابط...")
 
     files, title = [], "Media"
     try:
+        await msg.edit_text("⬇️ جارٍ تحميل الميديا...")
         files, title = await asyncio.wait_for(
             asyncio.to_thread(download_media, url),
             timeout=90,
         )
     except asyncio.TimeoutError:
         log.warning("download timed out after 90s for %s", url[:60])
+        try:
+            await msg.edit_text("⏰ انتهت مهلة التحميل (90 ثانية). حاول مرة أخرى.")
+        except Exception:
+            pass
+        return
     except Exception as e:
         log.exception("download_media error: %s", e)
+        try:
+            await msg.edit_text(f"❌ خطأ أثناء التحميل: {str(e)[:100]}")
+        except Exception:
+            pass
+        return
 
     if not files:
         try:
@@ -341,20 +348,29 @@ async def message_handler(client, message):
         return
 
     try:
-        await msg.edit_text(t(uid, 'uploading'))
+        await msg.edit_text(f"✅ تم التحميل! ({len(files)} ملف) جارٍ المعالجة...")
     except Exception:
         pass
 
     caption = f"✅ **{title}**"
 
+    try:
+        await msg.edit_text(f"🗜️ جارٍ ضغط الصور... (0/{len(files)})")
+    except Exception:
+        pass
+
     compressed = []
-    for f in files:
+    for fi, f in enumerate(files):
         if not os.path.exists(f):
             log.warning("file missing before compress: %s", f)
             continue
         if is_video_file(f):
             compressed.append(f)
         else:
+            try:
+                await msg.edit_text(f"🗜️ جارٍ ضغط الصور... ({fi+1}/{len(files)})")
+            except Exception:
+                pass
             c = _compress_image(f, max_size=512, quality=50)
             if c and os.path.exists(c):
                 compressed.append(c)
@@ -371,6 +387,11 @@ async def message_handler(client, message):
 
     try:
         if len(images) > 1:
+            try:
+                await msg.edit_text(f"📤 جارٍ رفع الألبوم... ({len(images)} صورة)")
+            except Exception:
+                pass
+
             sent_album = False
             try:
                 url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMediaGroup"
@@ -412,9 +433,17 @@ async def message_handler(client, message):
                     log.warning("pyrogram album failed: %s", e)
 
             if not sent_album:
+                try:
+                    await msg.edit_text("📤 جارٍ رفع الصور واحد واحد...")
+                except Exception:
+                    pass
                 for i, fp in enumerate(images):
                     if not os.path.exists(fp) or os.path.getsize(fp) < 100:
                         continue
+                    try:
+                        await msg.edit_text(f"📤 جارٍ رفع الصورة {i+1}/{len(images)}...")
+                    except Exception:
+                        pass
                     cap = caption if i == 0 else ""
                     sent = await asyncio.to_thread(_bot_api_send, uid, fp, cap, False)
                     if not sent:
@@ -425,6 +454,10 @@ async def message_handler(client, message):
                     await asyncio.sleep(1)
 
         elif len(images) == 1:
+            try:
+                await msg.edit_text("📤 جارٍ رفع الصورة...")
+            except Exception:
+                pass
             fp = images[0]
             if os.path.exists(fp) and os.path.getsize(fp) >= 100:
                 log.info("processing single image %s", os.path.basename(fp))
@@ -440,6 +473,10 @@ async def message_handler(client, message):
             try:
                 if not os.path.exists(fp) or os.path.getsize(fp) < 100:
                     continue
+                try:
+                    await msg.edit_text(f"📤 جارٍ رفع الفيديو {i+1}/{len(videos)}...")
+                except Exception:
+                    pass
                 cap = caption if i == 0 and not images else ""
                 log.info("processing video %s (%d bytes)", os.path.basename(fp), os.path.getsize(fp))
                 sent = await asyncio.to_thread(_bot_api_send, uid, fp, cap, True)
@@ -454,7 +491,14 @@ async def message_handler(client, message):
                 log.warning("video upload failed: %s", e)
 
         try:
+            await msg.edit_text("✅ تم بنجاح!")
+        except Exception:
+            pass
+        await asyncio.sleep(2)
+        try:
             await msg.delete()
+        except Exception:
+            pass
         except Exception:
             pass
     except Exception as e:
