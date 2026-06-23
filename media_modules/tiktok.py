@@ -34,7 +34,7 @@ def _download_tikwm_images(url: str) -> Tuple[List[str], str]:
         images = info.get("images") or []
         if images:
             files = []
-            for i, img_url in enumerate(images[:10]):
+            for i, img_url in enumerate(images):
                 if isinstance(img_url, str):
                     f = download_file(img_url, f"tt_img_{i}", "jpg",
                                       referer="https://www.tiktok.com/")

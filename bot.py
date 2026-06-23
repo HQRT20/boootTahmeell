@@ -375,42 +375,46 @@ async def message_handler(client, message):
                 pass
 
             sent_album = False
-            try:
-                url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMediaGroup"
-                valid = [(i, fp) for i, fp in enumerate(images) if os.path.exists(fp) and os.path.getsize(fp) >= 100]
-                if valid:
-                    media_json = []
-                    files_dict = {}
-                    for idx, (i, fp) in enumerate(valid):
-                        tag = f"file{idx}"
-                        if idx == 0:
-                            media_json.append({"type": "photo", "media": f"attach://{tag}", "caption": caption})
+            valid = [fp for fp in images if os.path.exists(fp) and os.path.getsize(fp) >= 100]
+            if valid:
+                try:
+                    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMediaGroup"
+                    for batch_start in range(0, len(valid), 10):
+                        batch = valid[batch_start:batch_start + 10]
+                        media_json = []
+                        files_dict = {}
+                        for idx, fp in enumerate(batch):
+                            tag = f"file{idx}"
+                            if batch_start == 0 and idx == 0:
+                                media_json.append({"type": "photo", "media": f"attach://{tag}", "caption": caption})
+                            else:
+                                media_json.append({"type": "photo", "media": f"attach://{tag}"})
+                            files_dict[tag] = (os.path.basename(fp), open(fp, "rb"), "image/jpeg")
+                        resp = requests.post(api_url, data={"chat_id": uid, "media": json.dumps(media_json)}, files=files_dict, timeout=120)
+                        for _, _, fh in files_dict.values():
+                            try:
+                                fh.close()
+                            except Exception:
+                                pass
+                        if resp.status_code == 200 and resp.json().get("ok"):
+                            sent_album = True
+                            log.info("album batch sent: %d images (offset %d)", len(batch), batch_start)
                         else:
-                            media_json.append({"type": "photo", "media": f"attach://{tag}"})
-                        files_dict[tag] = (os.path.basename(fp), open(fp, "rb"), "image/jpeg")
-                    resp = requests.post(url, data={"chat_id": uid, "media": json.dumps(media_json)}, files=files_dict, timeout=120)
-                    for _, _, fh in files_dict.values():
-                        try:
-                            fh.close()
-                        except Exception:
-                            pass
-                    if resp.status_code == 200 and resp.json().get("ok"):
-                        sent_album = True
-                        log.info("album sent via bot api: %d images", len(valid))
-                    else:
-                        log.warning("bot api album error: %s %s", resp.status_code, resp.text[:200])
-            except Exception as e:
-                log.warning("bot api album failed: %s", e)
+                            log.warning("bot api album error: %s %s", resp.status_code, resp.text[:200])
+                        await asyncio.sleep(1)
+                except Exception as e:
+                    log.warning("bot api album failed: %s", e)
 
             if not sent_album:
                 try:
-                    valid_imgs = [fp for fp in images if os.path.exists(fp) and os.path.getsize(fp) >= 100]
-                    if valid_imgs:
+                    for batch_start in range(0, len(valid), 10):
+                        batch = valid[batch_start:batch_start + 10]
                         await asyncio.wait_for(message.reply_media_group(
-                            [InputMediaPhoto(fp, caption=caption if i == 0 else "") for i, fp in enumerate(valid_imgs)]
+                            [InputMediaPhoto(fp, caption=caption if batch_start == 0 and i == 0 else "") for i, fp in enumerate(batch)]
                         ), timeout=120)
-                        log.info("album sent via pyrogram: %d images", len(valid_imgs))
+                        log.info("album batch sent via pyrogram: %d images", len(batch))
                         sent_album = True
+                        await asyncio.sleep(1)
                 except Exception as e:
                     log.warning("pyrogram album failed: %s", e)
 
