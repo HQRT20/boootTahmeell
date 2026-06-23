@@ -23,7 +23,7 @@ logging.basicConfig(
 log = logging.getLogger("bot")
 
 
-def _compress_image(filepath: str, max_size: int = 600, quality: int = 60) -> Optional[str]:
+def _compress_image(filepath: str, max_size: int = 512, quality: int = 50) -> Optional[str]:
     """Compress image aggressively for Telegram upload from slow servers."""
     try:
         from PIL import Image
@@ -80,9 +80,9 @@ def _upload_to_telegraph(filepath: str) -> Optional[str]:
             data = resp.json()
             if isinstance(data, list) and data and "src" in data[0]:
                 return "https://telegra.ph" + data[0]["src"]
-        log.debug("telegraph response: %s %s", resp.status_code, resp.text[:200])
+        log.warning("telegraph response: %s %s", resp.status_code, resp.text[:200])
     except Exception as e:
-        log.debug("telegraph upload failed: %s", e)
+        log.warning("telegraph upload failed: %s", e)
     return None
 
 
@@ -94,17 +94,20 @@ def _bot_api_send(chat_id: int, filepath: str, caption: str = "", is_video: bool
         field = "video" if is_video else "photo"
         data = {"chat_id": chat_id}
         if caption:
-            data["caption"] = caption
-            data["parse_mode"] = "Markdown"
+            clean_cap = caption.replace("**", "").replace("__", "")
+            data["caption"] = clean_cap
         with open(filepath, "rb") as f:
             resp = requests.post(url, data=data, files={field: f}, timeout=120)
         if resp.status_code == 200:
             result = resp.json()
             if result.get("ok"):
+                log.info("bot api %s sent OK to %s", method, chat_id)
                 return True
-        log.debug("bot api %s failed: %s %s", method, resp.status_code, resp.text[:200])
+            log.warning("bot api %s ok=false: %s", method, str(result)[:200])
+        else:
+            log.warning("bot api %s HTTP %s: %s", method, resp.status_code, resp.text[:200])
     except Exception as e:
-        log.debug("bot api send failed: %s", e)
+        log.warning("bot api %s failed: %s", method, e)
     return False
 
 
@@ -309,7 +312,7 @@ async def message_handler(client, message):
         if is_video_file(f):
             compressed.append(f)
         else:
-            c = _compress_image(f, max_size=600, quality=60)
+            c = _compress_image(f, max_size=512, quality=50)
             if c and os.path.exists(c):
                 compressed.append(c)
             else:
@@ -331,31 +334,42 @@ async def message_handler(client, message):
                 is_vid = is_video_file(fp)
                 sent = False
 
-                sent = await asyncio.to_thread(_bot_api_send, uid, fp, cap, is_vid)
-                if sent:
-                    log.info("bot api send ok for %s", os.path.basename(fp))
+                if is_vid:
+                    sent = await asyncio.to_thread(_bot_api_send, uid, fp, cap, True)
+                    if not sent:
+                        try:
+                            await asyncio.wait_for(message.reply_video(fp, caption=cap, supports_streaming=True), timeout=60)
+                            sent = True
+                        except Exception:
+                            pass
                 else:
-                    if not is_vid:
-                        telegraph_url = await asyncio.to_thread(_upload_to_telegraph, fp)
-                        if telegraph_url:
-                            log.info("telegraph ok: %s", telegraph_url)
+                    telegraph_url = await asyncio.to_thread(_upload_to_telegraph, fp)
+                    if telegraph_url:
+                        log.info("telegraph ok: %s", telegraph_url)
+                        try:
+                            await message.reply_photo(telegraph_url, caption=cap)
+                            sent = True
+                        except Exception as e1:
+                            log.warning("reply_photo telegraph failed: %s", e1)
                             try:
-                                if cap:
-                                    await message.reply_photo(telegraph_url, caption=cap)
-                                else:
-                                    await message.reply_photo(telegraph_url)
+                                await message.reply_text(telegraph_url, caption=cap)
                                 sent = True
-                            except Exception as send_err:
-                                log.warning("send telegraph photo failed: %s", send_err)
+                            except Exception as e2:
+                                log.warning("reply_text telegraph failed: %s", e2)
+
+                    if not sent:
+                        sent = await asyncio.to_thread(_bot_api_send, uid, fp, cap, False)
 
                     if not sent:
                         try:
                             await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=60)
                             sent = True
-                        except Exception as doc_err:
-                            log.warning("document fallback failed: %s", doc_err)
+                        except Exception as e3:
+                            log.warning("document fallback failed: %s", e3)
 
-                if not sent:
+                if sent:
+                    log.info("delivered: %s", os.path.basename(fp))
+                else:
                     log.warning("all methods failed for %s", fp)
 
             except asyncio.TimeoutError:
