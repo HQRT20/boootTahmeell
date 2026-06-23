@@ -20,6 +20,10 @@ def download_twitter(url: str) -> Tuple[List[str], str]:
     if not twitter_id:
         return download_with_ytdlp(url)
 
+    files, title = download_with_ytdlp(url)
+    if files:
+        return files, title or "Twitter Media"
+
     files, title = _try_fxtwitter(twitter_id, handle)
     if files:
         return files, title
@@ -27,10 +31,6 @@ def download_twitter(url: str) -> Tuple[List[str], str]:
     files, title = _try_syndication(twitter_id)
     if files:
         return files, title
-
-    files, title = download_with_ytdlp(url)
-    if files:
-        return files, title or "Twitter Media"
 
     return _playwright_twitter(url)
 

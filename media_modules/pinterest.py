@@ -10,13 +10,16 @@ log = logging.getLogger("downloader.pinterest")
 
 
 def download_pinterest(url: str) -> Tuple[List[str], str]:
-    files, title = _try_scrape(url)
-    if files:
-        return files, title
     files, title = download_with_ytdlp(url, for_images=False)
     if files:
         return files, title or "Pinterest Media"
-    return download_with_ytdlp(url, for_images=True)
+
+    files, title = download_with_ytdlp(url, for_images=True)
+    if files:
+        return files, title
+
+    files, title = _try_scrape(url)
+    return files, title
 
 
 def _try_scrape(url: str) -> Tuple[List[str], str]:

@@ -9,13 +9,16 @@ log = logging.getLogger("downloader.facebook")
 
 
 def download_facebook(url: str) -> Tuple[List[str], str]:
-    files, title = _download_fbdown(url)
-    if files:
-        return files, title
     files, title = download_with_ytdlp(url, for_images=False)
     if files:
         return files, title or "Facebook Media"
-    return download_with_ytdlp(url, for_images=True)
+
+    files, title = _download_fbdown(url)
+    if files:
+        return files, title
+
+    files, title = download_with_ytdlp(url, for_images=True)
+    return files, title
 
 
 def _download_fbdown(url: str) -> Tuple[List[str], str]:
