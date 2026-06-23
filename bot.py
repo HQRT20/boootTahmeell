@@ -24,7 +24,7 @@ log = logging.getLogger("bot")
 
 
 def _compress_image(filepath: str, max_size: int = 512, quality: int = 50) -> Optional[str]:
-    """Compress image aggressively for Telegram upload from slow servers."""
+    """Compress image for Telegram. Returns path to valid JPEG or None."""
     try:
         from PIL import Image
         ext = os.path.splitext(filepath)[1].lower()
@@ -41,6 +41,8 @@ def _compress_image(filepath: str, max_size: int = 512, quality: int = 50) -> Op
         img.load()
 
         if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        elif img.mode != "RGB":
             img = img.convert("RGB")
 
         w, h = img.size
@@ -64,8 +66,8 @@ def _compress_image(filepath: str, max_size: int = 512, quality: int = 50) -> Op
             return new_path
         return filepath
     except Exception as e:
-        log.debug("compress failed for %s: %s", filepath, e)
-        return filepath
+        log.warning("compress failed for %s: %s", filepath, e)
+        return None
 
 app = Client("downloader_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 

@@ -50,23 +50,24 @@ def _dl(url: str, prefix: str, ext: str = "mp4", retries: int = 2) -> Optional[s
     for attempt in range(retries + 1):
         try:
             filepath = os.path.join(DOWNLOADS_DIR, f"{prefix}_{uuid.uuid4().hex[:8]}.{ext}")
-            r = requests.get(url, headers={"User-Agent": UA}, stream=True, timeout=30)
+            r = requests.get(url, headers={"User-Agent": UA}, timeout=30)
             if r.status_code != 200:
                 if attempt < retries:
                     import time; time.sleep(1)
                     continue
                 return None
-            with open(filepath, "wb") as f:
-                for chunk in r.iter_content(chunk_size=256 * 1024):
-                    if chunk:
-                        f.write(chunk)
-            size = os.path.getsize(filepath)
-            if size < 256:
-                try:
-                    os.remove(filepath)
-                except OSError:
-                    pass
+            ct = r.headers.get("content-type", "")
+            data = r.content
+            if len(data) < 256:
+                if attempt < retries:
+                    import time; time.sleep(1)
+                    continue
                 return None
+            if "text/html" in ct:
+                log.debug("_dl got HTML from %s (ct=%s)", url[:80], ct)
+                return None
+            with open(filepath, "wb") as f:
+                f.write(data)
             return filepath
         except Exception as e:
             log.debug("_dl attempt %d failed for %s: %s", attempt + 1, url[:80], e)
