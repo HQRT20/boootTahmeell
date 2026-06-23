@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import json
 import logging
 import requests
 import uuid
@@ -360,46 +361,97 @@ async def message_handler(client, message):
             else:
                 fsize = os.path.getsize(f) if os.path.exists(f) else 0
                 if fsize > 100:
-                    log.info("compress failed but keeping file as document: %s (%d bytes)", os.path.basename(f), fsize)
+                    log.info("compress failed but keeping file: %s (%d bytes)", os.path.basename(f), fsize)
                     compressed.append(f)
     files = [f for f in compressed if os.path.exists(f)]
     log.info("uploading %d files: %s", len(files), [os.path.basename(f) for f in files])
 
-    try:
-        for i, fp in enumerate(files):
-            try:
-                if not os.path.exists(fp):
-                    continue
-                fsize = os.path.getsize(fp)
-                if fsize < 100:
-                    log.warning("skip tiny file %s (%d bytes)", fp, fsize)
-                    continue
-                log.info("processing %s (%d bytes)", os.path.basename(fp), fsize)
-                cap = caption if i == 0 else ""
-                is_vid = is_video_file(fp)
-                sent = False
+    images = [f for f in files if not is_video_file(f)]
+    videos = [f for f in files if is_video_file(f)]
 
-                sent = await asyncio.to_thread(_bot_api_send, uid, fp, cap, is_vid)
+    try:
+        if len(images) > 1:
+            sent_album = False
+            try:
+                url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMediaGroup"
+                valid = [(i, fp) for i, fp in enumerate(images) if os.path.exists(fp) and os.path.getsize(fp) >= 100]
+                if valid:
+                    media_json = []
+                    files_dict = {}
+                    for idx, (i, fp) in enumerate(valid):
+                        tag = f"file{idx}"
+                        if idx == 0:
+                            media_json.append({"type": "photo", "media": f"attach://{tag}", "caption": caption})
+                        else:
+                            media_json.append({"type": "photo", "media": f"attach://{tag}"})
+                        files_dict[tag] = (os.path.basename(fp), open(fp, "rb"), "image/jpeg")
+                    resp = requests.post(url, data={"chat_id": uid, "media": json.dumps(media_json)}, files=files_dict, timeout=120)
+                    for _, _, fh in files_dict.values():
+                        try:
+                            fh.close()
+                        except Exception:
+                            pass
+                    if resp.status_code == 200 and resp.json().get("ok"):
+                        sent_album = True
+                        log.info("album sent via bot api: %d images", len(valid))
+                    else:
+                        log.warning("bot api album error: %s %s", resp.status_code, resp.text[:200])
+            except Exception as e:
+                log.warning("bot api album failed: %s", e)
+
+            if not sent_album:
+                try:
+                    valid_imgs = [fp for fp in images if os.path.exists(fp) and os.path.getsize(fp) >= 100]
+                    if valid_imgs:
+                        await asyncio.wait_for(message.reply_media_group(
+                            [InputMediaPhoto(fp, caption=caption if i == 0 else "") for i, fp in enumerate(valid_imgs)]
+                        ), timeout=120)
+                        log.info("album sent via pyrogram: %d images", len(valid_imgs))
+                        sent_album = True
+                except Exception as e:
+                    log.warning("pyrogram album failed: %s", e)
+
+            if not sent_album:
+                for i, fp in enumerate(images):
+                    if not os.path.exists(fp) or os.path.getsize(fp) < 100:
+                        continue
+                    cap = caption if i == 0 else ""
+                    sent = await asyncio.to_thread(_bot_api_send, uid, fp, cap, False)
+                    if not sent:
+                        try:
+                            await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=60)
+                        except Exception:
+                            pass
+                    await asyncio.sleep(1)
+
+        elif len(images) == 1:
+            fp = images[0]
+            if os.path.exists(fp) and os.path.getsize(fp) >= 100:
+                log.info("processing single image %s", os.path.basename(fp))
+                sent = await asyncio.to_thread(_bot_api_send, uid, fp, caption, False)
                 if not sent:
                     try:
-                        if is_vid:
-                            await asyncio.wait_for(message.reply_video(fp, caption=cap, supports_streaming=True), timeout=60)
-                        else:
-                            await asyncio.wait_for(message.reply_document(fp, caption=cap), timeout=60)
-                        sent = True
-                    except Exception as fallback_err:
-                        log.warning("pyrogram fallback failed: %s", fallback_err)
+                        await asyncio.wait_for(message.reply_document(fp, caption=caption), timeout=60)
+                    except Exception:
+                        pass
+                log.info("delivered: %s", os.path.basename(fp))
 
-                if sent:
-                    log.info("delivered: %s", os.path.basename(fp))
-                else:
-                    log.warning("all methods failed for %s", fp)
-
-            except asyncio.TimeoutError:
-                log.warning("upload timed out for file %d: %s", i, fp)
+        for i, fp in enumerate(videos):
+            try:
+                if not os.path.exists(fp) or os.path.getsize(fp) < 100:
+                    continue
+                cap = caption if i == 0 and not images else ""
+                log.info("processing video %s (%d bytes)", os.path.basename(fp), os.path.getsize(fp))
+                sent = await asyncio.to_thread(_bot_api_send, uid, fp, cap, True)
+                if not sent:
+                    try:
+                        await asyncio.wait_for(message.reply_video(fp, caption=cap, supports_streaming=True), timeout=60)
+                    except Exception:
+                        pass
+                log.info("delivered: %s", os.path.basename(fp))
+                await asyncio.sleep(1)
             except Exception as e:
-                log.warning("upload file %d failed: %s", i, e)
-            await asyncio.sleep(1)
+                log.warning("video upload failed: %s", e)
 
         try:
             await msg.delete()
