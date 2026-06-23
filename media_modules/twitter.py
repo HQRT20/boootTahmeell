@@ -18,9 +18,9 @@ except ImportError:
 def download_twitter(url: str) -> Tuple[List[str], str]:
     handle, twitter_id = _extract_twitter_id(url)
     if not twitter_id:
-        return download_with_ytdlp(url)
+        return download_with_ytdlp(url, platform="twitter")
 
-    files, title = download_with_ytdlp(url)
+    files, title = download_with_ytdlp(url, platform="twitter")
     if files:
         return files, title or "Twitter Media"
 

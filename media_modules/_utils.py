@@ -96,7 +96,7 @@ def detect_ext(url: str, content_type: str = "") -> str:
     return "mp4"
 
 
-def build_ydl_opts(for_images: bool = False) -> dict:
+def build_ydl_opts(for_images: bool = False, platform: str = "") -> dict:
     base = {
         'outtmpl': f'{DOWNLOADS_DIR}/%(id)s.%(ext)s',
         'quiet': True,
@@ -114,11 +114,38 @@ def build_ydl_opts(for_images: bool = False) -> dict:
         base['format'] = 'best[ext=jpg]/best[ext=jpeg]/best[ext=png]/best[ext=webp]/best'
     else:
         base['format'] = 'best[acodec!=none][ext=mp4]/best[acodec!=none]/best'
-    if os.path.exists(COOKIES_FILE):
-        base['cookiefile'] = COOKIES_FILE
-    elif os.path.exists('instagram_cookies.txt'):
-        base['cookiefile'] = 'instagram_cookies.txt'
+    cookie_file = _find_cookie_file(platform)
+    if cookie_file:
+        base['cookiefile'] = cookie_file
     return base
+
+
+def _find_cookie_file(platform: str = "") -> Optional[str]:
+    candidates = []
+    if platform == "twitter":
+        from config import TW_COOKIES
+        if TW_COOKIES:
+            candidates.append(TW_COOKIES)
+        candidates.append("twitter_cookies.txt")
+    elif platform == "facebook":
+        from config import FB_COOKIES
+        if FB_COOKIES:
+            candidates.append(FB_COOKIES)
+        candidates.append("facebook_cookies.txt")
+    elif platform == "instagram":
+        from config import COOKIES_FILE
+        candidates.append(COOKIES_FILE)
+        candidates.append("instagram_cookies.txt")
+    else:
+        from config import COOKIES_FILE
+        candidates.append(COOKIES_FILE)
+        candidates.append("instagram_cookies.txt")
+        candidates.append("twitter_cookies.txt")
+        candidates.append("facebook_cookies.txt")
+    for f in candidates:
+        if f and os.path.exists(f):
+            return f
+    return None
 
 
 def is_video_file(path: str) -> bool:
@@ -200,13 +227,13 @@ def get_playwright_cookies() -> List[dict]:
     return out
 
 
-def download_with_ytdlp(url: str, for_images: bool = False) -> Tuple[List[str], str]:
+def download_with_ytdlp(url: str, for_images: bool = False, platform: str = "") -> Tuple[List[str], str]:
     import yt_dlp
     files: List[str] = []
     seen: set = set()
     title = "Media"
     try:
-        opts = build_ydl_opts(for_images=for_images)
+        opts = build_ydl_opts(for_images=for_images, platform=platform)
         log.info("yt-dlp starting: images=%s url=%s", for_images, url[:60])
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
