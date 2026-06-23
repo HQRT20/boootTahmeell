@@ -348,38 +348,13 @@ async def message_handler(client, message):
         return
 
     try:
-        await msg.edit_text(f"✅ تم التحميل! ({len(files)} ملف) جارٍ المعالجة...")
+        await msg.edit_text(f"✅ تم التحميل! ({len(files)} ملف) جارٍ الرفع...")
     except Exception:
         pass
 
     caption = f"✅ **{title}**"
 
-    try:
-        await msg.edit_text(f"🗜️ جارٍ ضغط الصور... (0/{len(files)})")
-    except Exception:
-        pass
-
-    compressed = []
-    for fi, f in enumerate(files):
-        if not os.path.exists(f):
-            log.warning("file missing before compress: %s", f)
-            continue
-        if is_video_file(f):
-            compressed.append(f)
-        else:
-            try:
-                await msg.edit_text(f"🗜️ جارٍ ضغط الصور... ({fi+1}/{len(files)})")
-            except Exception:
-                pass
-            c = _compress_image(f, max_size=512, quality=50)
-            if c and os.path.exists(c):
-                compressed.append(c)
-            else:
-                fsize = os.path.getsize(f) if os.path.exists(f) else 0
-                if fsize > 100:
-                    log.info("compress failed but keeping file: %s (%d bytes)", os.path.basename(f), fsize)
-                    compressed.append(f)
-    files = [f for f in compressed if os.path.exists(f)]
+    files = [f for f in files if os.path.exists(f) and os.path.getsize(f) > 100]
     log.info("uploading %d files: %s", len(files), [os.path.basename(f) for f in files])
 
     images = [f for f in files if not is_video_file(f)]
