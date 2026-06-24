@@ -122,17 +122,7 @@ def build_ydl_opts(for_images: bool = False, platform: str = "") -> dict:
 
 def _find_cookie_file(platform: str = "") -> Optional[str]:
     candidates = []
-    if platform == "twitter":
-        from config import TW_COOKIES
-        if TW_COOKIES:
-            candidates.append(TW_COOKIES)
-        candidates.append("twitter_cookies.txt")
-    elif platform == "facebook":
-        from config import FB_COOKIES
-        if FB_COOKIES:
-            candidates.append(FB_COOKIES)
-        candidates.append("facebook_cookies.txt")
-    elif platform == "instagram":
+    if platform == "instagram":
         from config import COOKIES_FILE
         candidates.append(COOKIES_FILE)
         candidates.append("instagram_cookies.txt")
@@ -140,8 +130,6 @@ def _find_cookie_file(platform: str = "") -> Optional[str]:
         from config import COOKIES_FILE
         candidates.append(COOKIES_FILE)
         candidates.append("instagram_cookies.txt")
-        candidates.append("twitter_cookies.txt")
-        candidates.append("facebook_cookies.txt")
     for f in candidates:
         if f and os.path.exists(f):
             return f

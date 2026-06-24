@@ -21,6 +21,7 @@ from locales import t
 from utils import track_user, check_subscription, home_kb, admin_kb, back_kb, build_channel_list_kb
 from downloader import download_media
 from media_modules import is_video_file
+from media_modules.youtube import download_youtube, download_youtube_audio
 
 logging.basicConfig(
     level=logging.INFO,
@@ -117,12 +118,18 @@ def _upload_to_telegraph(filepath: str) -> Optional[str]:
     return None
 
 
-def _bot_api_send(chat_id: int, filepath: str, caption: str = "", is_video: bool = False) -> bool:
+def _bot_api_send(chat_id: int, filepath: str, caption: str = "", is_video: bool = False, is_audio: bool = False) -> bool:
     """Send file directly via Telegram Bot API (bypasses Pyrogram DC2)."""
     clean_cap = (caption or "").replace("**", "").replace("__", "")
     fname = os.path.basename(filepath)
+    ext = os.path.splitext(filepath)[1].lower()
 
-    if is_video:
+    if is_audio:
+        mime_map = {'.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.opus': 'audio/opus',
+                     '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.webm': 'audio/webm'}
+        mime = mime_map.get(ext, 'audio/mpeg')
+        methods = [("sendAudio", "audio", mime)]
+    elif is_video:
         methods = [("sendVideo", "video", "video/mp4")]
     else:
         is_image = False
@@ -142,9 +149,7 @@ def _bot_api_send(chat_id: int, filepath: str, caption: str = "", is_video: bool
         try:
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
             data = {"chat_id": chat_id}
-            if clean_cap and method != "sendVideo":
-                data["caption"] = clean_cap
-            if clean_cap and method == "sendVideo":
+            if clean_cap:
                 data["caption"] = clean_cap
             with open(filepath, "rb") as f:
                 resp = requests.post(url, data=data, files={field: (fname, f, mime)}, timeout=120)
@@ -207,6 +212,90 @@ async def cb_handler(client, query):
         await query.answer(t(uid, 'lang_changed'))
         await query.message.edit_text(t(uid, 'welcome'), reply_markup=home_kb(uid))
 
+    # YouTube callbacks
+    elif data.startswith("yt_audio:") or data.startswith("yt_video:"):
+        parts = data.split(":", 2)
+        if len(parts) < 3:
+            return await query.answer("❌ رابط غير صالح")
+        cb_uid = int(parts[1]) if parts[1].isdigit() else 0
+        yt_url = parts[2]
+        if uid != cb_uid:
+            return await query.answer("❌ هذا الزر ليس لك!")
+
+        is_audio = data.startswith("yt_audio:")
+        label = "🎵 صوت (MP3)" if is_audio else "🎬 فيديو"
+        try:
+            await query.message.edit_text(f"⏳ جارٍ تحميل {label}...")
+        except Exception:
+            pass
+
+        try:
+            if is_audio:
+                files, title = await asyncio.wait_for(
+                    asyncio.to_thread(download_youtube_audio, yt_url),
+                    timeout=120,
+                )
+            else:
+                files, title = await asyncio.wait_for(
+                    asyncio.to_thread(download_youtube, yt_url),
+                    timeout=120,
+                )
+        except asyncio.TimeoutError:
+            try:
+                await query.message.edit_text("⏰ انتهت مهلة التحميل. حاول مرة أخرى.")
+            except Exception:
+                pass
+            return
+        except Exception as e:
+            log.exception("yt download error: %s", e)
+            try:
+                await query.message.edit_text(f"❌ خطأ: {str(e)[:100]}")
+            except Exception:
+                pass
+            return
+
+        if not files:
+            try:
+                await query.message.edit_text("❌ فشل التحميل. تأكد من صحة الرابط.")
+            except Exception:
+                pass
+            return
+
+        try:
+            await query.message.edit_text(f"📤 جارٍ رفع {label}...")
+        except Exception:
+            pass
+
+        caption = f"✅ {title}"
+        files = [f for f in files if os.path.exists(f) and os.path.getsize(f) > 100]
+
+        for fp in files:
+            is_vid = is_video_file(fp)
+            ext = os.path.splitext(fp)[1].lower()
+            is_aud = is_audio and ext in ('.mp3', '.m4a', '.opus', '.ogg', '.wav', '.webm')
+            sent = await asyncio.to_thread(_bot_api_send, uid, fp, caption, is_vid, is_aud)
+            if not sent:
+                try:
+                    if is_aud:
+                        await asyncio.wait_for(query.message.reply_audio(fp, caption=caption), timeout=120)
+                    elif is_vid:
+                        await asyncio.wait_for(query.message.reply_video(fp, caption=caption, supports_streaming=True), timeout=120)
+                    else:
+                        await asyncio.wait_for(query.message.reply_document(fp, caption=caption), timeout=120)
+                except Exception:
+                    pass
+
+        try:
+            await query.message.edit_text("✅ تم بنجاح!")
+        except Exception:
+            pass
+        await asyncio.sleep(2)
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        _cleanup(files)
+
     # Admin callbacks
     elif data.startswith("admin_") and uid in ADMIN_IDS:
         if data == "admin_home":
@@ -234,22 +323,14 @@ async def cb_handler(client, query):
             await query.message.edit_text(t(uid, 'channels_btn'), reply_markup=kb)
         elif data == "admin_cookies":
             db.delete(f"state_{uid}")
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("Instagram", callback_data="admin_cookie_ig"),
-                 InlineKeyboardButton("Twitter", callback_data="admin_cookie_tw")],
-                [InlineKeyboardButton("Facebook", callback_data="admin_cookie_fb")],
-                [InlineKeyboardButton(t(uid, 'back_btn'), callback_data="admin_home")],
-            ])
-            await query.message.edit_text("🍪 اختر المنصة لكوكيز:", reply_markup=kb)
-        elif data.startswith("admin_cookie_"):
-            platform = data.replace("admin_cookie_", "")
-            db.set(f"state_{uid}", f"cookie_{platform}")
-            names = {"ig": "Instagram", "tw": "Twitter", "fb": "Facebook"}
+            db.set(f"state_{uid}", "cookie_ig")
             await query.message.edit_text(
-                f"📤 ارسل محتوى ملف كوكيز {names.get(platform, platform)}:\n\n"
+                "📤 ارسل محتوى ملف كوكيز Instagram:\n\n"
                 "الصق محتوى الملف كاملاً هنا (تنسيق Netscape)",
-                reply_markup=back_kb(uid, "admin_cookies")
+                reply_markup=back_kb(uid, "admin_home")
             )
+        elif data.startswith("admin_cookie_"):
+            pass
         elif data == "admin_add_ch":
             db.set(f"state_{uid}", "add_ch")
             await query.message.edit_text(t(uid, 'add_ch_prompt'), reply_markup=back_kb(uid, "admin_channels"))
@@ -333,8 +414,6 @@ async def message_handler(client, message):
             platform = state.replace("cookie_", "")
             files_map = {
                 "ig": "instagram_cookies.txt",
-                "tw": "twitter_cookies.txt",
-                "fb": "facebook_cookies.txt",
             }
             cookie_file = files_map.get(platform)
             if cookie_file and text.strip():
@@ -356,6 +435,17 @@ async def message_handler(client, message):
     ok, btns = await check_subscription(client, uid)
     if not ok:
         return await message.reply_text(t(uid, 'subscribe_first'), reply_markup=InlineKeyboardMarkup(btns))
+
+    url_lower = url.lower()
+    is_youtube = any(d in url_lower for d in ("youtube.com", "youtu.be"))
+
+    if is_youtube:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎵 تحميل صوت (MP3)", callback_data=f"yt_audio:{uid}:{url}")],
+            [InlineKeyboardButton("🎬 تحميل فيديو", callback_data=f"yt_video:{uid}:{url}")],
+        ])
+        await message.reply_text(f"🔍 تم اكتشاف رابط يوتيوب\n\n🎬 اختر طريقة التحميل:", reply_markup=kb)
+        return
 
     msg = await message.reply_text("🔍 جارٍ تحليل الرابط...")
 

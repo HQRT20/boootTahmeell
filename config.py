@@ -19,9 +19,6 @@ except (ValueError, TypeError):
 DOWNLOADS_DIR = "downloads"
 COOKIES_FILE  = "cookies.txt"
 
-TW_COOKIES  = os.getenv("TW_COOKIES", "")
-FB_COOKIES  = os.getenv("FB_COOKIES", "")
-
 COBALT_INSTANCES = [
     x.strip() for x in os.getenv(
         "COBALT_INSTANCES",

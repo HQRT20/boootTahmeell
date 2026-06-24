@@ -4,8 +4,8 @@ from typing import List, Tuple
 
 from media_modules._utils import download_with_ytdlp
 from media_modules import (
-    download_youtube, download_tiktok, download_facebook,
-    download_twitter, download_instagram, download_pinterest,
+    download_youtube, download_tiktok,
+    download_instagram, download_pinterest,
 )
 
 log = logging.getLogger("downloader")
@@ -35,15 +35,6 @@ def download_media(url: str) -> Tuple[List[str], str]:
         except Exception as e:
             log.warning("tiktok failed: %s", e)
 
-    if any(d in url_lower for d in ("x.com", "twitter.com")):
-        try:
-            files, title = download_twitter(url)
-            if files:
-                log.info("twitter done: %d files", len(files))
-                return files, title
-        except Exception as e:
-            log.warning("twitter failed: %s", e)
-
     if any(d in url_lower for d in ("youtube.com", "youtu.be")):
         try:
             files, title = download_youtube(url)
@@ -52,15 +43,6 @@ def download_media(url: str) -> Tuple[List[str], str]:
                 return files, title
         except Exception as e:
             log.warning("youtube failed: %s", e)
-
-    if any(d in url_lower for d in ("facebook.com", "fb.watch", "fb.com")):
-        try:
-            files, title = download_facebook(url)
-            if files:
-                log.info("facebook done: %d files", len(files))
-                return files, title
-        except Exception as e:
-            log.warning("facebook failed: %s", e)
 
     if any(d in url_lower for d in ("pinterest.com", "pin.it")):
         try:

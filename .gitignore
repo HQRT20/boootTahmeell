@@ -9,5 +9,4 @@ __pycache__/
 *.log
 .env
 cookies.txt
-
 users.json

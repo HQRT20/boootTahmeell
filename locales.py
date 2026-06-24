@@ -2,7 +2,7 @@ from database import db
 
 STRINGS = {
     'ar': {
-        'welcome':          "👋 أهلاً! أرسل أي رابط من إنستغرام، تيك توك، تويتر، فيسبوك أو يوتيوب وسأحمّله لك.",
+        'welcome':          "👋 أهلاً! أرسل أي رابط من إنستغرام، تيك توك أو يوتيوب وسأحمّله لك.",
         'banned':           "🚫 أنت محظور من استخدام هذا البوت.",
         'subscribe_first':  "⚠️ يجب الاشتراك في القناة أولاً، ثم أرسل /start",
         'searching':        "🔍 جار التحليل...",
@@ -40,10 +40,10 @@ STRINGS = {
         'ch_add_fail':      "❌ فشل. تأكد أن البوت مشرف في القناة.",
         'no_channels':      "لا توجد قنوات مضافة.",
         'ch_deleted':       "✅ تم حذف القناة.",
-        'help_text':        "📖 أرسل أي رابط من:\nإنستغرام | تيك توك | تويتر | فيسبوك | يوتيوب | بينترست\nوسيتم التحميل تلقائياً.",
+        'help_text':        "📖 أرسل أي رابط من:\nإنستغرام | تيك توك | يوتيوب | بينترست\nوسيتم التحميل تلقائياً.",
     },
     'en': {
-        'welcome':          "👋 Send any link from Instagram, TikTok, Twitter, Facebook or YouTube and I'll download it!",
+        'welcome':          "👋 Send any link from Instagram, TikTok or YouTube and I'll download it!",
         'banned':           "🚫 You are banned from using this bot.",
         'subscribe_first':  "⚠️ Please subscribe to the channel first, then send /start",
         'searching':        "🔍 Analyzing...",
@@ -81,7 +81,7 @@ STRINGS = {
         'ch_add_fail':      "❌ Failed. Make sure the bot is admin in the channel.",
         'no_channels':      "No channels added.",
         'ch_deleted':       "✅ Channel removed.",
-        'help_text':        "📖 Send any link from:\nInstagram | TikTok | Twitter | Facebook | YouTube | Pinterest\nAnd it will be downloaded automatically.",
+        'help_text':        "📖 Send any link from:\nInstagram | TikTok | YouTube | Pinterest\nAnd it will be downloaded automatically.",
     }
 }
 
