@@ -17,13 +17,6 @@ except (ValueError, TypeError):
     ADMIN_IDS = []
 
 DOWNLOADS_DIR = "downloads"
-COOKIES_FILE  = "cookies.txt"
-
-COBALT_INSTANCES = [
-    x.strip() for x in os.getenv(
-        "COBALT_INSTANCES",
-        "cobalt-backend.canine.tools,cobalt-api.meowing.de,capi.3kh0.net"
-    ).split(",") if x.strip()
-]
+COOKIES_FILE = "cookies.txt"
 
 os.makedirs(DOWNLOADS_DIR, exist_ok=True)

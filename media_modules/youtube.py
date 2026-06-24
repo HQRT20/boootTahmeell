@@ -13,8 +13,7 @@ HAS_FFMPEG = shutil.which("ffmpeg") is not None
 
 
 def download_youtube(url: str) -> Tuple[List[str], str]:
-    files, title = _download_with_ytdlp(url, for_images=False)
-    return files, title or "YouTube Media"
+    return _run_ytdlp(url, for_images=False)
 
 
 def download_youtube_audio(url: str) -> Tuple[List[str], str]:
@@ -22,30 +21,26 @@ def download_youtube_audio(url: str) -> Tuple[List[str], str]:
     title = "YouTube Audio"
     try:
         opts = build_ydl_opts()
-        opts['format'] = 'bestaudio/best'
-        opts['outtmpl'] = f'{DOWNLOADS_DIR}/%(id)s.%(ext)s'
-
+        opts["format"] = "bestaudio/best"
+        opts["outtmpl"] = f"{DOWNLOADS_DIR}/%(id)s.%(ext)s"
         if HAS_FFMPEG:
-            opts['postprocessors'] = [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '128',
+            opts["postprocessors"] = [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "128",
             }]
-            log.info("yt-dlp audio (ffmpeg mp3): %s", url[:60])
-        else:
-            log.info("yt-dlp audio (no ffmpeg, raw): %s", url[:60])
-
+        log.info("yt-dlp audio (ffmpeg=%s): %s", HAS_FFMPEG, url[:60])
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             if info:
-                title = (info.get('title') or info.get('description') or title)[:100]
-                vid_id = info.get('id', '')
+                title = (info.get("title") or info.get("description") or title)[:100]
+                vid_id = info.get("id", "")
                 if HAS_FFMPEG:
                     mp3_path = os.path.join(DOWNLOADS_DIR, f"{vid_id}.mp3")
                     if os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 100:
                         files.append(mp3_path)
                 if not files:
-                    for ext in ('mp3', 'm4a', 'opus', 'ogg', 'wav', 'webm'):
+                    for ext in ("mp3", "m4a", "opus", "ogg", "wav", "webm"):
                         p = os.path.join(DOWNLOADS_DIR, f"{vid_id}.{ext}")
                         if os.path.exists(p) and os.path.getsize(p) > 100:
                             files.append(p)
@@ -61,7 +56,7 @@ def download_youtube_audio(url: str) -> Tuple[List[str], str]:
     return files, title
 
 
-def _download_with_ytdlp(url: str, for_images: bool = False) -> Tuple[List[str], str]:
+def _run_ytdlp(url: str, for_images: bool = False) -> Tuple[List[str], str]:
     files: List[str] = []
     seen: set = set()
     title = "Media"
@@ -71,8 +66,8 @@ def _download_with_ytdlp(url: str, for_images: bool = False) -> Tuple[List[str],
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             if info:
-                title = (info.get('title') or info.get('description') or title)[:100]
-                entries = info.get('entries') or [info]
+                title = (info.get("title") or info.get("description") or title)[:100]
+                entries = info.get("entries") or [info]
                 for entry in entries:
                     if not entry:
                         continue

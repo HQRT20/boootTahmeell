@@ -9,4 +9,5 @@ __pycache__/
 *.log
 .env
 cookies.txt
+instagram_cookies.txt
 users.json
