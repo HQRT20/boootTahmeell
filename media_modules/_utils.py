@@ -205,6 +205,32 @@ def get_playwright_cookies() -> List[dict]:
 
 # ── Internal Helpers ───────────────────────────────────────────
 
+def download_with_ytdlp(url: str, for_images: bool = False, platform: str = "") -> Tuple[List[str], str]:
+    import yt_dlp
+    files: List[str] = []
+    seen: set = set()
+    title = "Media"
+    try:
+        opts = build_ydl_opts(for_images=for_images, platform=platform)
+        log.info("yt-dlp starting: images=%s url=%s", for_images, url[:60])
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            if info:
+                title = (info.get("title") or info.get("description") or title)[:100]
+                entries = info.get("entries") or [info]
+                for entry in entries:
+                    if not entry:
+                        continue
+                    f = find_file(ydl.prepare_filename(entry))
+                    if f and f not in seen:
+                        seen.add(f)
+                        files.append(f)
+        log.info("yt-dlp done: %d files", len(files))
+    except Exception as e:
+        log.exception("yt-dlp failed: %s", e)
+    return files, title
+
+
 def _guess_ext_from_url(url: str) -> str:
     url_lower = url.split("?", 1)[0].lower()
     for ext in ("mp4", "webm", "mkv", "gif", "jpg", "jpeg", "png", "webp"):
