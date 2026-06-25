@@ -29,23 +29,32 @@ def download_file(url: str, prefix: str, ext: str = "mp4",
             headers = {"User-Agent": UA, "Accept": "*/*"}
             if referer:
                 headers["Referer"] = referer
-            r = requests.get(url, headers=headers, timeout=30)
+            r = requests.get(url, headers=headers, timeout=30, stream=True)
             if r.status_code != 200:
                 if attempt < retries:
                     time.sleep(1)
                     continue
                 return None
             ct = r.headers.get("content-type", "")
-            data = r.content
-            if len(data) < 256:
+            if "text/html" in ct:
+                r.close()
+                return None
+            total = 0
+            with open(filepath, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        total += len(chunk)
+                        f.write(chunk)
+            r.close()
+            if total < 256:
+                try:
+                    os.remove(filepath)
+                except OSError:
+                    pass
                 if attempt < retries:
                     time.sleep(1)
                     continue
                 return None
-            if "text/html" in ct:
-                return None
-            with open(filepath, "wb") as f:
-                f.write(data)
             return filepath
         except Exception as e:
             log.debug("download_file attempt %d failed: %s", attempt + 1, e)
@@ -158,10 +167,11 @@ def build_ydl_opts(for_images: bool = False, platform: str = "") -> dict:
 
 
 def _find_cookie_file(platform: str = "") -> Optional[str]:
-    candidates = [COOKIES_FILE, "instagram_cookies.txt"]
-    for f in candidates:
-        if f and os.path.exists(f):
-            return f
+    if platform == "instagram" or not platform:
+        if os.path.exists("instagram_cookies.txt"):
+            return "instagram_cookies.txt"
+    if COOKIES_FILE and os.path.exists(COOKIES_FILE):
+        return COOKIES_FILE
     return None
 
 

@@ -10,8 +10,6 @@ except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
 import requests
-from typing import Optional
-
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 
@@ -145,9 +143,12 @@ async def cb_handler(client, query):
         if len(parts) < 3:
             return await query.answer("❌ رابط غير صالح")
         cb_uid = int(parts[1]) if parts[1].isdigit() else 0
-        yt_url = parts[2]
+        short_id = parts[2]
+        yt_url = db.get(f"yt_url_{uid}_{short_id}")
         if uid != cb_uid:
             return await query.answer("❌ هذا الزر ليس لك!")
+        if not yt_url:
+            return await query.answer("❌ انتهت صلاحية الرابط، أرسله مرة أخرى")
 
         is_audio = data.startswith("yt_audio:")
         label = "🎵 صوت (MP3)" if is_audio else "🎬 فيديو"
@@ -213,6 +214,7 @@ async def cb_handler(client, query):
         except Exception:
             pass
         _cleanup(files)
+        db.delete(f"yt_url_{uid}_{short_id}")
 
     # ── Admin Panel ──
     elif data.startswith("admin_") and uid in ADMIN_IDS:
@@ -267,10 +269,9 @@ async def _handle_admin(client, query, uid, data):
 
     elif data.startswith("admin_del_"):
         ch_raw = data[10:]
-        ch_id = int(ch_raw) if ch_raw.isdigit() else ch_raw
         channels = db.get("force_subscribe_channels") or []
         for i, ch in enumerate(channels):
-            if ch == ch_id or str(ch) == str(ch_raw):
+            if ch == ch_raw or str(ch) == ch_raw:
                 channels.pop(i)
                 db.set("force_subscribe_channels", channels)
                 break
@@ -313,9 +314,12 @@ async def message_handler(client, message):
 
     # YouTube → show choice buttons
     if is_youtube:
+        import hashlib
+        short_id = hashlib.md5(url.encode()).hexdigest()[:8]
+        db.set(f"yt_url_{uid}_{short_id}", url)
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎵 تحميل صوت (MP3)", callback_data=f"yt_audio:{uid}:{url}")],
-            [InlineKeyboardButton("🎬 تحميل فيديو", callback_data=f"yt_video:{uid}:{url}")],
+            [InlineKeyboardButton("🎵 تحميل صوت (MP3)", callback_data=f"yt_audio:{uid}:{short_id}")],
+            [InlineKeyboardButton("🎬 تحميل فيديو", callback_data=f"yt_video:{uid}:{short_id}")],
         ])
         return await message.reply_text("🔍 تم اكتشاف رابط يوتيوب\n\n🎬 اختر طريقة التحميل:", reply_markup=kb)
 
@@ -430,7 +434,7 @@ async def _upload_files(message, msg, uid, files, title):
             except Exception:
                 pass
             fp = images[0]
-            if os.path.exists(fp) and os.path.getsize(fp) >= 100:
+            if os.path.exists(fp) and os.path.getsize(fp) > 100:
                 sent = await asyncio.to_thread(_bot_api_send, uid, fp, caption)
                 if not sent:
                     try:
@@ -492,19 +496,28 @@ async def _upload_album(message, msg, uid, images, caption):
                 batch = valid[batch_start:batch_start + 10]
                 media_json = []
                 files_dict = {}
+                handles = []
                 for idx, fp in enumerate(batch):
                     tag = f"file{idx}"
                     cap = caption if batch_start == 0 and idx == 0 else ""
                     media_json.append({"type": "photo", "media": f"attach://{tag}", "caption": cap})
-                    files_dict[tag] = (os.path.basename(fp), open(fp, "rb"), "image/jpeg")
-                resp = requests.post(api_url, data={"chat_id": uid, "media": json.dumps(media_json)}, files=files_dict, timeout=120)
-                for _, _, fh in files_dict.values():
-                    try:
-                        fh.close()
-                    except Exception:
-                        pass
-                if resp.status_code == 200 and resp.json().get("ok"):
-                    sent_album = True
+                    fh = open(fp, "rb")
+                    files_dict[tag] = (os.path.basename(fp), fh, "image/jpeg")
+                    handles.append(fh)
+                try:
+                    resp = await asyncio.to_thread(
+                        requests.post, api_url,
+                        data={"chat_id": uid, "media": json.dumps(media_json)},
+                        files=files_dict, timeout=120
+                    )
+                    if resp.status_code == 200 and resp.json().get("ok"):
+                        sent_album = True
+                finally:
+                    for fh in handles:
+                        try:
+                            fh.close()
+                        except Exception:
+                            pass
                 await asyncio.sleep(1)
         except Exception as e:
             log.warning("bot api album failed: %s", e)
