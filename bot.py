@@ -34,6 +34,8 @@ app = Client("downloader_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_T
 #  Helpers
 # ══════════════════════════════════════════════════════════════
 
+_upload_session = requests.Session()
+
 def _bot_api_send(chat_id: int, filepath: str, caption: str = "",
                   is_video: bool = False, is_audio: bool = False) -> bool:
     clean_cap = (caption or "").replace("**", "").replace("__", "")
@@ -67,19 +69,30 @@ def _bot_api_send(chat_id: int, filepath: str, caption: str = "",
             methods = [("sendDocument", "document", "application/octet-stream")]
 
     for method, field, mime in methods:
-        try:
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
-            data = {"chat_id": chat_id}
-            if clean_cap:
-                data["caption"] = clean_cap
-            with open(filepath, "rb") as f:
-                resp = requests.post(url, data=data, files={field: (fname, f, mime)}, timeout=120)
-            if resp.status_code == 200 and resp.json().get("ok"):
-                log.info("bot api %s sent OK to %s", method, chat_id)
-                return True
-            log.warning("bot api %s failed: %s %s", method, resp.status_code, resp.text[:200])
-        except Exception as e:
-            log.warning("bot api %s error: %s", method, e)
+        for attempt in range(3):
+            try:
+                url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+                data = {"chat_id": chat_id}
+                if clean_cap:
+                    data["caption"] = clean_cap
+                with open(filepath, "rb") as f:
+                    resp = _upload_session.post(url, data=data, files={field: (fname, f, mime)}, timeout=180)
+                if resp.status_code == 200 and resp.json().get("ok"):
+                    log.info("bot api %s sent OK to %s", method, chat_id)
+                    return True
+                if resp.status_code == 429:
+                    import time
+                    retry_after = resp.json().get("parameters", {}).get("retry_after", 30)
+                    log.warning("rate limited, waiting %ds", retry_after)
+                    time.sleep(retry_after)
+                    continue
+                log.warning("bot api %s failed: %s %s", method, resp.status_code, resp.text[:200])
+                break
+            except Exception as e:
+                log.warning("bot api %s attempt %d error: %s", method, attempt + 1, e)
+                if attempt < 2:
+                    import time
+                    time.sleep(2)
     return False
 
 

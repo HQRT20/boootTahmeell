@@ -41,7 +41,7 @@ def download_file(url: str, prefix: str, ext: str = "mp4",
                 return None
             total = 0
             with open(filepath, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
+                for chunk in r.iter_content(chunk_size=131072):
                     if chunk:
                         total += len(chunk)
                         f.write(chunk)
@@ -75,7 +75,7 @@ def download_url(url: str, prefix: str = "file", cookies=None,
             if r.status_code != 200:
                 return None
             with open(filepath, "wb") as f:
-                for chunk in r.iter_content(chunk_size=64 * 1024):
+                for chunk in r.iter_content(chunk_size=131072):
                     if chunk:
                         f.write(chunk)
         if os.path.getsize(filepath) < 256:
@@ -149,8 +149,10 @@ def build_ydl_opts(for_images: bool = False, platform: str = "") -> dict:
         "no_warnings": True,
         "ignore_no_formats_error": True,
         "http_chunk_size": 1048576,
-        "retries": 2,
-        "fragment_retries": 2,
+        "concurrent_fragment_downloads": 8,
+        "retries": 5,
+        "fragment_retries": 5,
+        "http_retries": 3,
         "noplaylist": True,
         "extract_flat": False,
         "socket_timeout": 30,

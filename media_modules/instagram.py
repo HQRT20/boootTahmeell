@@ -26,11 +26,10 @@ def download_instagram(url: str) -> Tuple[List[str], str]:
     files, title = download_with_ytdlp(url, for_images=False)
     if files:
         return files, title or "Instagram Media"
-    if "/reel/" not in url.lower():
-        files, title = download_with_ytdlp(url, for_images=True)
-        if files:
-            return files, title or "Instagram Media"
-    return _playwright_instagram(url)
+    files, title = download_with_ytdlp(url, for_images=True)
+    if files:
+        return files, title or "Instagram Media"
+    return [], ""
 
 
 def _load_ig_cookies():
@@ -79,11 +78,6 @@ def _get_ig_session(url):
     cookies = _load_ig_cookies()
     if cookies:
         s.cookies.update(cookies)
-    else:
-        try:
-            s.get(url, timeout=15)
-        except Exception:
-            pass
     return s
 
 
@@ -122,8 +116,6 @@ def _ig_parse_item(item):
                     best = max(imgs, key=lambda i: i.get("width", 0) * i.get("height", 0))
                     if best.get("url"):
                         files.append(("image", best["url"]))
-            if len(files) >= 10:
-                break
     else:
         imgs = (item.get("image_versions2") or {}).get("candidates") or []
         if imgs:
@@ -332,8 +324,6 @@ def _download_ig_api(url: str) -> Tuple[List[str], str]:
                 f = download_file(vid_url, f"ig_emb_{len(files)}", "mp4", referer="https://www.instagram.com/")
                 if f:
                     files.append(f)
-                if len(files) >= 10:
-                    break
             if not files:
                 for m in re.finditer(r'"display_url"\s*:\s*"(https?://[^"]+)"', html):
                     img_url = m.group(1).replace("\\u0026", "&")
@@ -341,8 +331,6 @@ def _download_ig_api(url: str) -> Tuple[List[str], str]:
                     if f:
                         f = fix_extension(f)
                         files.append(f)
-                    if len(files) >= 10:
-                        break
             if files:
                 log.info("ig embed: found %d files", len(files))
                 return files, title or "Instagram Media"
